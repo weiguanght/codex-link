@@ -1,0 +1,21 @@
+.local/
+build/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Local environment, credentials and signing material
+.env
+.env.*
+!.env.example
+*.key
+*.p12
+*.pfx
+*.mobileprovision
+*.provisionprofile
+
+# Generated installers and developer-specific Xcode state
+*.ipa
+DerivedData/
+xcuserdata/
+*.xcuserstate
