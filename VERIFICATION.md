@@ -8,7 +8,6 @@
 - IPv4／IPv6 模拟器 smoke **8 项检查通过**：Keychain、固定 TLS 与错误证书拒绝、认证和 bootstrap、项目／会话列表、只读历史、设置读回、幂等发送／重试、停止及审批响应。
 - 原生 UI XCTest **1 项通过**，确认没有 WKWebView，并实际走通任务创建／发送、会话状态、设置草稿放弃确认及新建项目。日志：`build/native-ui-test.log`；结果包：`build/native-ui-20261105-005827.xcresult`。
 - arm64 Release **BUILD SUCCEEDED**；已生成 `build/codex-link-0.1.0-unsigned.ipa` 与经 ad-hoc 签名校验的 `build/codex-link-0.1.0-TrollStore.ipa`，校验值见 `build/SHA256SUMS.txt`。未安装真机；TrollStore 安装及真机 Keychain 行为仍待设备验证。
-- 完整 Python unittest 收集到 91 项，90 项实际用例通过；唯一导入错误来自仓库缺失的 `清理CodexExec对话.command`。独立跑其他模块期间有两项设置 RPC 的 0.1 秒超时测试受模拟器启动负载影响而失败；完整回归中的这两项通过。没有重建或伪造该删除脚本。
 - 本轮未安装真机、未连接生产网关、未改动真实 `~/.codex`、未提交或推送。
 
 ## 后续更新：双击直接清理 exec 对话
