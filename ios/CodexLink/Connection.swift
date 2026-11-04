@@ -9,7 +9,7 @@ final class Connection: ObservableObject {
     @Published var peer: Peer?
     @Published var connectedURL: URL?
     @Published var online = false
-    let browser = BrowserSession()
+    let api = NativeAPI()
     private let discovery = Discovery()
     private let monitor = NWPathMonitor()
     private var wifi = true
@@ -40,9 +40,6 @@ final class Connection: ObservableObject {
             }
         }
         discovery.onError = { [weak self] message in self?.status = message }
-        browser.onFailure = { [weak self] message in
-            self?.status = "页面连接异常：" + message
-        }
         monitor.pathUpdateHandler = { [weak self] path in
             let owner = self
             Task { @MainActor in
@@ -147,13 +144,13 @@ final class Connection: ObservableObject {
                     }
                     throw LinkError.message("等待 Mac 确认超时")
                 }
-                let reuse = connectedURL == base && !browser.needsReload && Date().timeIntervalSince(issuedAt) < 6 * 3600
+                let reuse = connectedURL == base && self.api.ready && Date().timeIntervalSince(issuedAt) < 6 * 3600
                 let (reply, code) = try await api.call(reuse ? "link/status" : "link/session", peer: saved)
                 guard code == 200 else {
                     if reply.state == "revoked" || reply.state == "denied" || reply.state == "unknown" {
                         status = "这台 iPhone 的授权已撤销或丢失，请在局域网重新配对"
                         online = false
-                        browser.clear()
+                        self.api.clear()
                         connectedURL = nil
                         return
                     }
@@ -187,7 +184,7 @@ final class Connection: ObservableObject {
         try Vault.save(saved)
         peer = saved
         if let cookie = reply.cookie {
-            try await browser.connect(base: base, fingerprint: saved.pin, cookie: cookie)
+            try await api.connect(base: base, pin: saved.pin, cookie: cookie)
             issuedAt = Date()
         }
         guard !Task.isCancelled, active, generation == epoch else { return }
@@ -205,7 +202,7 @@ final class Connection: ObservableObject {
             connectedURL = nil
             online = false
             fatalVaultError = false
-            browser.clear()
+            api.clear()
             status = "已忘记 Mac；请在同一 Wi-Fi 重新发现。旧设备授权需在 Mac 端撤销。"
             if active { discovery.start() }
         } catch { status = error.localizedDescription }

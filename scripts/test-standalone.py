@@ -15,9 +15,10 @@ def main():
         copy = Path(folder) / 'codex-link'
         copy.mkdir()
         ignore = shutil.ignore_patterns('__pycache__', '*.pyc', '.DS_Store', '.local', 'build')
-        for name in ('mac', 'vendor', 'tests'):
+        for name in ('mac', 'vendor', 'web', 'tests'):
             shutil.copytree(ROOT / name, copy / name, ignore=ignore)
         shutil.copy2(ROOT / 'run-mac.py', copy / 'run-mac.py')
+        shutil.copy2(ROOT / '清理CodexExec对话.command', copy / '清理CodexExec对话.command')
         # No pairing files, real home, upstream sibling or build cache is copied.
         assert not (copy / '.local').exists()
         assert not (copy.parent / 'codex-mobile-bridge-1.3.2').exists()

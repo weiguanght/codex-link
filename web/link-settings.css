@@ -1,0 +1,39 @@
+/* Same monochrome cards and bottom-sheet hierarchy as the workspace UI. */
+.link-ui .settings-dialog { width: min(680px, calc(100vw - 40px)); max-height: 90dvh; overflow: auto; box-sizing: border-box; padding: 24px; }
+.settings-dialog .picker-head { margin-bottom: 8px; }
+.settings-note, .settings-status, .settings-readonly { font-size: 13px; line-height: 1.65; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.settings-readonly { padding: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; color: var(--text); }
+.settings-scope { display: grid; gap: 8px; font-size: 12px; margin: 18px 0; }
+.settings-scope select { width: 100%; min-width: 0; font-size: 16px; }
+.settings-tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+.settings-tabs button { flex-shrink: 0; white-space: nowrap; border-radius: 10px; font-size: 12px; min-height: 44px; padding: 8px 10px; }
+.settings-tabs button[aria-pressed=true] { background: var(--text); color: var(--page); }
+.settings-group { border: 0; padding: 0; margin: 24px 0 12px; min-width: 0; }
+.settings-group legend { font-size: 12px; color: var(--muted); font-weight: 600; padding: 0 0 10px; }
+.settings-field { padding: 14px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.settings-field:nth-child(2) { border-radius: 16px 16px 0 0; }
+.settings-field:last-child { border-radius: 0 0 16px 16px; border-bottom: 0; }
+.settings-field:only-of-type { border-radius: 16px; }
+.settings-field-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; font-weight: 500; }
+.settings-field input, .settings-field select, .settings-field textarea { width: 100%; box-sizing: border-box; min-width: 0; font-size: 16px; background-color: var(--raised); margin: 6px 0; border-radius: 10px; }
+.settings-field textarea { resize: vertical; padding: 12px; line-height: 1.6; color: var(--text); border: 1px solid var(--line); font-family: inherit; }
+.settings-field input:disabled, .settings-field select:disabled, .settings-field textarea:disabled { opacity: .7; -webkit-text-fill-color: var(--text); }
+.settings-reset { font-size: 12px; min-height: 44px; }
+.settings-effective { font-size: 11px; color: var(--muted); margin: 6px 0; overflow-wrap: anywhere; }
+.settings-effective summary { min-height: 28px; padding-top: 5px; cursor: pointer; }
+.settings-effective pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow: auto; font-size: 12px; }
+.settings-footer { position: sticky; bottom: -24px; background: var(--raised); display: flex; justify-content: space-between; gap: 12px; margin-top: 20px; padding: 14px 0 max(14px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+.settings-footer button { min-height: 44px; white-space: nowrap; flex: none; }
+.link-ui .settings-footer .primary { width: auto; flex: 1; }
+.settings-card { border-radius: 16px; background: var(--surface); padding: 16px; margin: 12px 0; font-size: 13px; overflow-wrap: anywhere; }
+.settings-card small { display: block; color: var(--muted); font-size: 11px; }
+.settings-card button { margin-top: 12px; min-height: 44px; }
+.settings-confirm { max-width: min(480px, calc(100vw - 32px)); box-sizing: border-box; }
+.settings-confirm h2 { font-size: 18px; }
+.settings-confirm button { min-height: 44px; margin: 4px; }
+.settings-appearance-entry { width: 100%; text-align: left; padding: 14px; background: var(--surface); border-radius: 12px; margin-bottom: 16px; }
+.link-ui .sidebar-foot .settings-entry { width: auto; white-space: nowrap; font-size: 12px; padding: 0 8px; }
+.link-ui .sidebar-foot > span { display: none; }
+@media (max-width: 620px) {
+  .link-ui .settings-dialog { width: 100%; max-width: 100%; margin: auto 0 0; max-height: 94dvh; border-radius: 24px 24px 0 0; padding: 20px 18px max(24px, env(safe-area-inset-bottom)); }
+}

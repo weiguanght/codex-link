@@ -4,6 +4,12 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 mkdir -p "$ROOT/build"
 python3 "$ROOT/scripts/make-icon.py"
 python3 "$ROOT/scripts/generate-project.py"
+if [ "${LINK_UI_TEST:-0}" = "1" ]; then
+  xcodebuild -project "$ROOT/ios/codex-link.xcodeproj" -scheme codex-link \
+    -configuration Debug -sdk iphonesimulator -derivedDataPath "$ROOT/build/native-ui" \
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS=LINK_SMOKE CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- \
+    build-for-testing > "$ROOT/build/native-ui-build.log" 2>&1
+fi
 xcodebuild -project "$ROOT/ios/codex-link.xcodeproj" -target codex-link \
   -configuration Debug -sdk iphonesimulator ARCHS="$(uname -m)" ONLY_ACTIVE_ARCH=YES \
   SWIFT_ACTIVE_COMPILATION_CONDITIONS=LINK_SMOKE \
@@ -47,8 +53,29 @@ SIMCTL_CHILD_LINK_SMOKE_PORT="$PORT" SIMCTL_CHILD_LINK_SMOKE_PIN="$PIN" SIMCTL_C
 for _ in {1..180}; do
   if [ -f "$CONTAINER/Documents/smoke.json" ]; then
     cp "$CONTAINER/Documents/smoke.json" "$ROOT/build/ios-smoke-result.json"
+    xcrun simctl io "$DEVICE" screenshot "$ROOT/build/native-home.png" >/dev/null 2>&1
     cat "$ROOT/build/ios-smoke-result.json"
     python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["result"]=="PASS" else 1)' "$ROOT/build/ios-smoke-result.json"
+    if [ "${LINK_UI_TEST:-0}" = "1" ]; then
+      python3 - "$ROOT" "$STAGE/config.json" <<'PY'
+import json, pathlib, plistlib, sys
+root = pathlib.Path(sys.argv[1]); config = json.loads(pathlib.Path(sys.argv[2]).read_text())
+source = next((root / 'build/native-ui/Build/Products').glob('*.xctestrun'))
+data = plistlib.loads(source.read_bytes())
+env = {'LINK_SMOKE_' + key.upper(): str(config[key]) for key in ('port', 'pin', 'id', 'project')}
+for key, value in data.items():
+    if key != '__xctestrun_metadata__' and isinstance(value, dict):
+        value.setdefault('EnvironmentVariables', {}).update(env)
+# Keep the xctestrun next to its products so __TESTROOT__ stays correct.
+source.write_bytes(plistlib.dumps(data))
+(root / 'build/native-ui-xctestrun.txt').write_text(str(source))
+PY
+      UI_RUN="$(cat "$ROOT/build/native-ui-xctestrun.txt")"
+      xcodebuild test-without-building -xctestrun "$UI_RUN" -destination "platform=iOS Simulator,id=$DEVICE" \
+        -parallel-testing-enabled NO -resultBundlePath "$ROOT/build/native-ui-$(date +%Y%m%d-%H%M%S).xcresult" \
+        > "$ROOT/build/native-ui-test.log" 2>&1
+      xcrun simctl io "$DEVICE" screenshot "$ROOT/build/native-ui-final.png" >/dev/null 2>&1 || true
+    fi
     exit
   fi
   sleep 1

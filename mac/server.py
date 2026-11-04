@@ -15,6 +15,14 @@ from bridge.auth import Auth
 from bridge.httpd import GatewayServer, Handler
 from .devices import Devices, identity, save_private
 from .network import origin
+from . import web_ui
+from . import history_http
+from .history_catalog import ReadingLibrary
+from .workspace import Workspace, ProjectHosts
+from . import workspace_http
+from .settings import CodexSettings
+from . import settings_http
+from . import native_http
 
 
 def certificate(directory):
@@ -75,6 +83,28 @@ class LinkHandler(Handler):
 
     def handle_method(self, write):
         path = urlsplit(self.path).path
+        if native_http.handle(self, write, path):
+            return
+        if settings_http.handle(self, write, path):
+            return
+        if workspace_http.handle(self, write, path):
+            return
+        if history_http.handle(self, write, path):
+            return
+        if not write and (path == '/' or path in web_ui.ASSETS):
+            try:
+                # Static presentation assets follow the same Host/Origin policy
+                # as upstream assets. This does not grant access to any API.
+                self.check_request(False)
+                if path == '/':
+                    return self.output(200, web_ui.page(self.server.web_dir), 'text/html; charset=utf-8')
+                name, content_type = web_ui.ASSETS[path]
+                return self.output(200, (web_ui.WEB_ROOT / name).read_bytes(), content_type)
+            except PermissionError as exc:
+                self.close_connection = True
+                return self.output(403, {'error': str(exc)})
+            except (OSError, ValueError):
+                return self.output(503, {'error': '无法加载网页资源，请检查安装完整性'})
         if path in ('/api/login', '/api/pair'):
             self.close_connection = True
             return self.output(403, {'error': '此入口仅支持设备配对，不接受密码或二维码登录'})
@@ -122,8 +152,18 @@ class LinkServer(GatewayServer):
     address_family = socket.AF_INET6
 
     def __init__(self, address, bridge, web_dir, directory, interfaces, confirm=None):
+        web_ui.validate()
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.workspace = None
+        self.reading = None
+        self.codex_settings = None
+        if getattr(bridge, 'codex_home', None) is not None:
+            # A loopback fixture may share the same bridge between listeners.
+            self.workspace = bridge.hosts.workspace if isinstance(bridge.hosts, ProjectHosts) else Workspace(directory, bridge.hosts)
+            bridge.hosts = ProjectHosts(self.workspace)
+            self.reading = ReadingLibrary(bridge, self.workspace)
+            self.codex_settings = CodexSettings(bridge, self.workspace)
         identity_path = directory / 'identity.json'
         self.identity = json.loads(identity_path.read_text()) if identity_path.exists() else {
             'id': str(uuid.uuid4()), 'name': socket.gethostname().split('.')[0]}

@@ -34,6 +34,9 @@ def main():
             from bridge.service import Bridge
             from bridge.httpd import GatewayServer
             from bridge.notifications import Notifications
+            from mac import web_ui
+            web_ui.validate()
+            web_ui.page(runtime / 'web')
         except (ValueError, ImportError) as exc:
             parser.error(str(exc))
         print('运行时检查通过：', runtime)

@@ -1,0 +1,13 @@
+.history-filters { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; }
+.history-filters select { width: auto; max-width: 60%; min-height: 40px; padding: 8px 30px 8px 10px; background-color: var(--surface); border: 0; border-radius: 12px; color: var(--text); font-size: 13px; }
+.history-filters label { display: flex; align-items: center; min-height: 44px; gap: 5px; cursor: pointer; }
+.history-filters input { margin: 0; width: 16px; height: 16px; }
+.history-project-back { text-align: left; }
+.history-project { display: block; width: 100%; text-align: left; position: relative; padding: 18px 36px 18px 18px; margin: 6px 0 12px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); }
+.history-project::after { content: '›'; position: absolute; right: 18px; top: 22px; color: var(--muted); font-size: 22px; }
+.history-project strong { display: block; font-size: 15px; font-weight: 550; overflow-wrap: anywhere; }
+.history-project small { display: block; margin-top: 8px; color: var(--muted); font-size: 12px; }
+.history-badge { margin-left: 8px; padding: 2px 5px; border-radius: 5px; font-size: 10px; font-weight: 400; background: var(--surface); color: var(--muted); }
+.history-read-bar { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 64px; padding: 10px max(18px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left)); border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.link-ui .host-errors { max-height: 100px; flex: none; overflow: auto; }
+.link-ui .history-readonly .newer { bottom: 84px; }

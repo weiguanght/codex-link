@@ -10,7 +10,7 @@ codex-link 是一个基于 [codex-mobile-bridge](https://github.com/try2love/cod
 
 > 本项目与 OpenAI 无隶属关系，不包含 Codex Desktop，不提供模型账号、API 密钥或模型额度。构建和自动测试通过，不代表已经完成所有真机与网络环境的验证。
 
-[快速开始](#快速开始) · [平台支持](#平台支持) · [构建与测试](#构建与测试) · [安全与限制](#安全与限制) · [验证记录](VERIFICATION.md)
+[快速开始](#快速开始) · [对话读取](docs/history-reading.md) · [Codex 设置](docs/codex-settings.md) · [平台支持](#平台支持) · [构建与测试](#构建与测试) · [安全与限制](#安全与限制) · [验证记录](VERIFICATION.md)
 
 ## 项目特点
 
@@ -19,18 +19,64 @@ codex-link 是一个基于 [codex-mobile-bridge](https://github.com/try2love/cod
 - **内外网切换**：优先局域网 IPv4，不可用时尝试已保存的公网 IPv6；不需要域名或中转服务。
 - **地址自动同步**：连接成功后同步 Mac 地址，优先记录非临时公网 IPv6。
 - **设备身份绑定**：iOS 使用 Keychain 保存凭据与证书指纹；后续连接拒绝不匹配的证书。
-- **复用上游聊天能力**：沿用会话列表、消息交互、审批、停止、附件等网页与网关接口；具体能力取决于目标 Codex 版本的兼容性。
+- **原生 Codex Remote 工作流**：iOS 用 SwiftUI 呈现任务首页、项目与会话、执行过程、审批和输入区；通过固定版本的网关 API 获取数据，继续复用既有设备认证和 Codex Desktop IPC。
+- **更完整的本机历史**：数据库与 JSONL 元信息结合发现，支持来源／归档／内部会话筛选；项目索引不受前 100 条限制，正文按页读取、长消息分段展开。
+- **阅读与控制分离**：CLI、exec 等历史只读，不自动恢复任务；原桌面会话仍走原 IPC 控制边界，也可切换到只读日志视图。
+- **项目与会话操作**：新建项目、浏览 Mac 目录、项目内新建对话、独立操作菜单、排序、多选、置顶与隐藏恢复；本机桌面会话支持归档／取消归档。
+- **真实 Codex 设置**：全局默认模型、推理、搜索、权限与开发者指令可保存并回读；支持技能开关、项目配置来源和 MCP 只读状态。
 - **文件分享**：iOS 支持前台文件下载后调用系统分享菜单。
+- **交互边界**：CLI／exec 来源保持只读；需在 Mac 确认的高级审批仍引导用户到桌面处理。当前原生 Markdown 重点覆盖常用段落、列表、链接与代码块，不支持表格与数学排版。
 - **源码自包含**：运行所需的上游 Python 模块、网页、字体及许可证已内置，不依赖旁边的其他项目目录。
 
 “免密码”指用户不需要输入密码，**不是允许任何人匿名控制电脑**。
+
+## 移动端界面
+
+新增完全原生的 SwiftUI iOS 客户端：任务首页、最近任务／项目视图、分页列表、状态详情、原生消息流与执行过程、审批、模型设置、附件分享和系统配置。Mac 上的共享网页保留给浏览器使用；iOS 不再通过 WKWebView 套壳。
+
+[查看原生界面与验证说明](docs/native-ios.md)。原生客户端需要重新构建并覆盖安装 IPA；保留相同 Bundle ID 和钥匙串条目，不需重新配对。
+
+## 对话读取
+
+本机默认展示全部来源的未归档、非内部会话。数据库 `threads` 为主要元信息来源，递归扫描 `sessions/`、`archived_sessions/` 补全发现，打开历史时按需读取 JSONL 正文。
+
+- **项目页**展示完整筛选集合的项目分组和数量，点击项目进入分页列表。
+- **只读历史**不会连接执行 owner，输入框和写操作不可用；缺失日志会明确提示，不能恢复已删除的正文。
+- **桌面会话**保留原有交互；详情中的“只读查看完整日志”可查看日志而不额外恢复任务。
+- 扩大发现范围仅适用于当前 Mac；SSH 主机暂保留原上游桌面范围。搜索还不支持正文全文检索。
+
+列表扩展仍由 Mac 网关提供；原生 iOS 更新需覆盖安装 IPA。原有设备凭据与配对状态保留。
+
+数据源、只读边界、性能限制与验收步骤见 [对话发现与历史读取](docs/history-reading.md)；改造前诊断见 [列表不完整分析](docs/session-discovery-analysis.md)。
+
+## 项目与会话管理
+
+工作空间标题旁点 **「＋ 项目」**，输入名称并选择 Mac 目录。默认添加已有目录；勾选后才创建新文件夹。空项目也会展示，并可直接在该目录新建对话。
+
+项目和会话旁的 **「···」** 提供各自操作；**「筛选与排序」** 中可切换归档／隐藏列表、排序与多选。只读历史可以置顶和隐藏，但不能重命名原始对话或归档。
+
+项目登记和列表偏好持久保存在 `.local/workspace.json`，不直接改写 Codex Desktop 项目配置。隐藏不等于删除，不会删除项目文件或会话日志。详情和能力差异见 [项目与对话操作说明](docs/workspace-actions.md)。
+
+## Codex 设置
+
+在工作空间底部 **Codex 设置**，或 **界面设置 → Codex 默认行为、Skills 与 MCP** 中打开。全局配置通过原生 app-server 接口保存，带版本校验与回读；失败保留草稿，权限变更需再次确认。
+
+项目有效配置当前只读：本机 0.160.0 原生接口拒绝项目配置写入。技能开关是用户级设置；MCP 是查询进程的只读状态。保存不热更新或接管当前桌面会话，桌面可能需重新加载配置。支持范围与验收见 [Codex 设置说明](docs/codex-settings.md)。
+
+原生 iOS 更新需覆盖安装 IPA；同一安装身份保留已有配对。设置能力仍按网关版本和 Codex Runtime 返回结果显示。
+
+## 清理 codex exec 历史
+
+双击项目根目录的 **[清理CodexExec对话.command](清理CodexExec对话.command)**，直接删除 exec 会话的日志、数据库记录及标题索引。**不预览、不备份、不询问确认、不移入废纸篓。** 单文件入口，无需单独运行 Python 脚本，内部使用本机 Python 3.10+ 标准库。
+
+**双击前先退出 Codex、CLI 任务和所有网关。** 非 exec 对话和项目不删除。具体范围和失败行为见 [exec 对话清理说明](docs/cleanup-codex-exec.md)。
 
 ## 平台支持
 
 | 平台 | 当前状态 | 说明 |
 | --- | --- | --- |
 | macOS | 已有网关启动入口 | 通过 Python / `.command` 运行；尚无独立 `.app` 或 `.dmg` 打包流程 |
-| iOS / iPadOS | 已有源码与 IPA 构建流程 | SwiftUI + WKWebView，最低 iOS 16.0；真机安装及兼容性仍需验证 |
+| iOS / iPadOS | 已有原生源码与 IPA 构建流程 | SwiftUI / URLSession / Network / Keychain，最低 iOS 16.0；真机安装及兼容性仍需验证 |
 | Windows | 尚未完成适配 | 上游保留部分 Windows 通信实现，但本项目启动器、配对和网络发现依赖 macOS |
 | Linux | 尚未完成适配 | 需要系统适配，并验证目标 Codex 运行方式与 IPC |
 | Android | 尚未实现 | 当前没有 Android 客户端源码或构建工程 |
@@ -41,7 +87,7 @@ codex-link 是一个基于 [codex-mobile-bridge](https://github.com/try2love/cod
 
 ```text
                     iPhone / iPad
-               SwiftUI + WKWebView
+                    原生 SwiftUI
                         │
               首次局域网自动发现
               Mac 确认 → 保存设备凭据
@@ -55,7 +101,7 @@ codex-link 是一个基于 [codex-mobile-bridge](https://github.com/try2love/cod
                         │ HTTPS + 设备认证
                         ▼
                 Mac Python 网关
-                共享网页 + 原生 IPC
+                    原生 IPC
                         │ Unix Socket
                         ▼
                   Codex 桌面版
@@ -64,7 +110,7 @@ codex-link 是一个基于 [codex-mobile-bridge](https://github.com/try2love/cod
 - Mac 广播服务类型为 `_codexlink._tcp`。
 - 初次配对只允许通过 Mac 直接连接的 IPv4 局域网，公网 IPv6 不接受首次配对。
 - 手机在前台每 15 秒触发连接探测，网络变化和返回前台也会尝试连接；实际切换时间受网络超时影响。
-- 认证后由网关发放网页会话 Cookie，继续使用上游的同源与 CSRF 校验。
+- 认证后原生 API 与浏览器网页共用网关设备会话 Cookie；原生 POST 继续提交 Origin 和 CSRF 校验。
 - 自动重连不会重发聊天消息、审批或其他 Codex 写操作。
 
 ## 环境要求
@@ -138,7 +184,7 @@ App 显示名称为 **codex-link**，Bundle ID 为 `local.codex.link`。TrollSto
 2. 允许“本地网络”访问。
 3. 等待自动发现；如果有多台 Mac，选择需要连接的一台。
 4. 确认是自己的手机后，在 Mac 弹窗中点一次 **“允许”**。
-5. 手机进入聊天网页，顶栏显示连接方式与 Mac 名称。
+5. 手机进入原生任务首页，顶栏显示工作区与 Mac 会话状态。
 
 首次连接不需要手动填写地址、扫码或输入密码。建议先只检查会话列表，再在专门的测试会话中验证消息与审批操作，避免干扰正在执行的任务。
 
@@ -203,6 +249,7 @@ python3 run-mac.py --revoke DEVICE_UUID
 | `revoked/` | 设备撤销标记 |
 | `auth-sessions.json` | 网页会话与访问控制状态 |
 | `bridge/` | 网关工作状态 |
+| `workspace.json` | 新建项目登记、显示名称、置顶与隐藏等列表偏好 |
 
 凭据文件使用 `0600` 权限，新建私有目录使用 `0700` 权限。手机侧凭据保存在 Keychain。
 
@@ -229,7 +276,7 @@ python3 run-mac.py --revoke DEVICE_UUID
 | Mac 网关 | Python 标准库、HTTPS、设备认证、Bonjour/mDNS |
 | Codex 通信 | 内置上游网关、Unix Socket、会话数据读取 |
 | 聊天网页 | 原生 HTML / CSS / JavaScript，SSE／轮询 |
-| iOS 客户端 | Swift / SwiftUI、WKWebView、Network、Keychain、证书绑定 |
+| iOS 客户端 | Swift / SwiftUI、URLSession、Network、Keychain、证书绑定 |
 | 构建 | Python 辅助脚本、Xcode / xcodebuild、codesign |
 
 ```text
@@ -240,12 +287,20 @@ codex-link/
 │   ├── runtime.py                 # 内置运行时定位
 │   ├── network.py                 # 网卡发现和局域网判断
 │   ├── devices.py                 # 配对确认、凭据哈希、撤销
+│   ├── web_ui.py                  # 组合上游页面与第一方界面资源
+│   ├── history_catalog.py         # 本机发现、能力判定与完整项目索引
+│   ├── history_reader.py          # 只读 JSONL 正文分页与长消息
+│   ├── history_http.py            # 历史接口与只读写操作保护
+│   ├── workspace.py               # 项目登记、列表偏好和目录浏览
+│   ├── workspace_http.py          # 项目管理、会话整理与归档接口
 │   └── server.py                  # TLS 双栈服务及设备认证适配
 ├── ios/
 │   ├── CodexLink/                 # Swift 客户端及资源
 │   ├── codex-link.xcodeproj/       # Xcode 工程
 │   └── TrollStore.entitlements    # TrollStore 专用签名配置
 ├── vendor/codex-mobile-bridge/    # 固定版本上游运行时与网页
+├── web/                           # 第一方 UI 与历史读取交互，无外部依赖
+├── docs/                          # 界面说明、预览、历史读取及问题分析
 ├── scripts/                       # 构建、快照维护及隔离测试脚本
 ├── tests/                         # 配对、接口、资源完整性测试
 ├── build/                         # 构建产物和日志，不提交
@@ -274,7 +329,7 @@ Xcode 工程由 `scripts/generate-project.py` 生成；需长期保留的构建�
 ### 后端与隔离测试
 
 ```sh
-# 配对、认证、CSRF、IPv6 和快照完整性测试
+# 配对、认证、CSRF、IPv6、历史读取和快照完整性测试
 python3 -m unittest discover -s tests -v
 
 # 在没有上游目录、空 HOME 的独立副本中再次验证
@@ -291,7 +346,7 @@ python3 scripts/test-standalone.py
 ./scripts/test-ios-smoke.sh
 ```
 
-默认创建一次性模拟器，验证 Keychain、证书绑定、错误证书拒绝，以及 IPv4／IPv6 回环上的 WKWebView 认证，结束后清理测试模拟器。它不验证真实蜂窝网络或路由器可达性。
+默认创建一次性模拟器，验证 Keychain、证书绑定、错误证书拒绝，以及原生 API 在 IPv4／IPv6 回环下的认证、会话与设置读写。`LINK_UI_TEST=1 bash scripts/test-ios-smoke.sh` 还会运行 SwiftUI 原生交互 UI 测试。测试使用临时合成会话，不连接用户的 Codex；不验证真实蜂窝网络或路由器可达性。
 
 ### 已记录的验证结果
 
@@ -299,12 +354,13 @@ python3 scripts/test-standalone.py
 | --- | --- |
 | iOS arm64 Release 构建 | 通过 |
 | TrollStore 包 ad-hoc 签名完整性检查 | 通过，不代表真机安装已验证 |
-| 后端与资源测试 | 23 项通过 |
+| 后端、历史读取、项目操作与资源测试 | 66 项通过 |
 | 无外部上游目录的隔离运行测试 | 通过 |
-| iOS 模拟器 Keychain、固定证书、IPv4／IPv6 网页认证 | 通过 |
+| Chromium / WebKit 模拟会话 UI 回归 | 通过，详见界面说明 |
+| iOS 模拟器 Keychain、固定证书、IPv4／IPv6 原生 API 冒烟 | 通过 |
 | 真机 Bonjour、配对弹窗、蜂窝 IPv6、实际 Codex 操作 | 尚需设备与环境验证 |
 
-详细范围与历史记录见 [VERIFICATION.md](VERIFICATION.md)。
+详细范围与历史记录见 [VERIFICATION.md](VERIFICATION.md)。历史读取测试使用合成日志；本机数量排查仅读取元信息，不代表真实完整对话或真实发送操作已验收。
 
 ## 安全与限制
 
@@ -322,9 +378,10 @@ python3 scripts/test-standalone.py
 - IPv6 变更后无法保证从外网找回新地址，IPv4-only 外部网络没有中转兜底。
 - Mac 必须保持在线；本版没有开机自启、后台常驻服务安装或自动防休眠。
 - iOS 进入后台后不保证维持连接；没有后台通知或后台文件续传。
-- IPv4／IPv6 切换会重载网页，未发送草稿和未完成上传可能丢失。
+- 设备地址切换可能中断正在进行的请求；内存中的文本草稿按会话保留，未完成附件上传需重新选择。
 - 文件能力沿用上游边界，不是其他手机助手项目完整文件管理和断点续传功能的复刻。
 - Codex 桌面版接口变化可能导致不兼容；本项目不能保证支持所有 Codex 版本。
+- 历史日志缺失无法恢复正文；未知日志格式、超大单条记录及特别大的活跃日志可能影响读取，详见 [读取限制](docs/history-reading.md#性能与格式限制)。
 
 ## 常见问题
 

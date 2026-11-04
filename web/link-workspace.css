@@ -1,0 +1,49 @@
+/* Explicit, touch-sized project/conversation workflows. No hover-only actions. */
+.workspace-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0; }
+.workspace-toolbar select { width: auto; flex: 1; min-width: 0; min-height: 40px; padding: 8px 26px 8px 9px; border: 0; border-radius: 10px; background-color: var(--surface); font-size: 12px; }
+.workspace-toolbar button { padding: 6px 9px; font-size: 12px; }
+.workspace-options { position: static; margin-left: auto; font-size: 12px; }
+.workspace-options > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; list-style: none; padding: 0 8px; border-radius: 12px; color: var(--muted); }
+.workspace-options > summary::-webkit-details-marker { display: none; }
+.workspace-options > summary::after { content: '⌄'; margin-left: 6px; }
+.workspace-options[open] > summary { background: var(--surface); color: var(--text); }
+.workspace-options-body { position: absolute; top: 100%; left: 0; right: 0; z-index: 5; padding: 12px; border-radius: 16px; border: 1px solid var(--line); background: var(--raised); box-shadow: var(--link-shadow); }
+.link-ui .list-filters { position: relative; }
+.workspace-options-body .archive { margin: 0; }
+.workspace-path { display: block; color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; white-space: normal; margin-top: 6px; }
+.workspace-project-row, .workspace-session-row { display: flex; align-items: center; position: relative; min-width: 0; }
+.workspace-project-row { border-radius: 16px; margin: 6px 0 12px; background: var(--surface); border: 1px solid var(--line); }
+.workspace-project-row .history-project { flex: 1; min-width: 0; width: auto; border: 0; background: transparent; margin: 0; padding: 16px 4px 16px 16px; }
+.workspace-project-row .history-project::after { display: none; }
+.workspace-project-row .history-project strong::before { content: ''; display: inline-block; width: 14px; height: 10px; margin-right: 10px; border: 1.5px solid var(--muted); border-radius: 3px; box-shadow: 0 -3px 0 -1px var(--surface), 0 -4px 0 -1px var(--muted); }
+.workspace-row-menu { flex: none; width: 44px; min-height: 48px; border: 0; border-radius: 12px; background: transparent; color: var(--muted); font-size: 23px; font-weight: 600; align-self: stretch; }
+.workspace-row-menu:hover { background: var(--line); }
+.workspace-session-row .session { flex: 1; min-width: 0; width: auto; }
+.workspace-session-row > input { width: 20px; height: 20px; flex: none; margin: 12px 6px; accent-color: var(--text); }
+.workspace-pin { font-size: 11px; color: var(--muted); font-weight: 400; }
+.workspace-context { position: relative; padding: 12px; background: var(--surface); border-radius: 14px; margin: 8px 0; }
+.workspace-context > strong { display: block; overflow-wrap: anywhere; }
+.workspace-context button { font-size: 12px; margin-top: 4px; }
+.workspace-project-open .project-group { border: 0; }
+.workspace-project-open .project-group > summary { display: none; }
+.workspace-batch { display: flex; flex-wrap: wrap; flex: none; align-items: center; gap: 4px; padding: 10px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); font-size: 12px; }
+.workspace-batch button { font-size: 12px; padding: 6px 9px; }
+.link-ui #workspace-new-project { flex: none; font-size: 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; white-space: nowrap; }
+.link-ui #workspace-chat-menu { flex: none; }
+.workspace-dialog { max-height: 85dvh; overflow: auto; }
+.workspace-menu > button { display: block; width: 100%; text-align: left; padding: 12px 10px; border-radius: 12px; }
+.workspace-menu > button:hover { background: var(--surface); }
+.workspace-hint { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.6; }
+.workspace-field { display: block; margin: 14px 0; font-size: 13px; }
+.workspace-field input { display: block; width: 100%; margin-top: 8px; font-size: 16px; box-sizing: border-box; }
+.workspace-check { display: flex; gap: 10px; align-items: center; margin: 16px 0; font-size: 13px; }
+.workspace-check input { width: 20px; height: 20px; flex: none; }
+.workspace-dialog > .primary { width: 100%; margin-top: 12px; }
+.workspace-directories { max-height: 30dvh; overflow: auto; margin: 8px 0; }
+.workspace-directories button { display: block; width: 100%; text-align: left; overflow-wrap: anywhere; }
+.workspace-file { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; font-size: 12px; line-height: 1.7; }
+@media (max-width: 620px) {
+  .link-ui .workspace-dialog { width: 100%; max-width: 100%; margin: auto 0 0; padding: 20px 20px max(24px, env(safe-area-inset-bottom)); border-radius: 24px 24px 0 0; box-sizing: border-box; }
+  .link-ui .chat-head { gap: 5px; }
+  .link-ui .chat-head .appearance-button { width: 36px; min-width: 36px; }
+}

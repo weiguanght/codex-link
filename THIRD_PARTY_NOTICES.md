@@ -11,6 +11,8 @@
 - 原始许可证：`vendor/codex-mobile-bridge/LICENSE`。
 - 采用 23 个 Python 运行时模块（含 `__init__.py`）及完整网页资源。没有修改这些文件的内容；不包含不使用的 Electron、旧启动器、更新器或部署工具。
 - 文件清单、来源记录、SHA-256：`vendor/codex-mobile-bridge/UPSTREAM.json`。这是本地快照完整性校验，不是远端来源真实性证明。
+- `web/link-presentation.js` 基于该版本的 `web/presentation.js` 改编，沿用其 MIT 许可证与版权；移除了思考摘要显示设置。
+- `web/link-timeline.js` 的分页投影与正文展开逻辑基于该版本的 `web/timeline.js` 改编，沿用其 MIT 许可证与版权；新增默认收起的工具活动分组。
 
 ## 随网页内置的组件
 

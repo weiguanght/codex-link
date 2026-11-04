@@ -225,6 +225,23 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(self.request('/link/session', self.value)[0], 403)
         self.assertEqual(self.bridge.sent, [])
 
+    def test_first_party_page_and_assets_keep_security_headers(self):
+        for path, mime in (('/', 'text/html'), ('/link-ui.css', 'text/css'), ('/link-ui.js', 'text/javascript'),
+                           ('/link-timeline.js', 'text/javascript'), ('/link-presentation.js', 'text/javascript')):
+            code, body, headers = self.request(path)
+            self.assertEqual(code, 200)
+            self.assertTrue(headers['Content-Type'].startswith(mime))
+            self.assertIn("script-src 'self'", headers['Content-Security-Policy'])
+            self.assertEqual(headers['Cache-Control'], 'no-store')
+            self.assertNotIn('Set-Cookie', headers)
+            if path == '/':
+                self.assertIn(b'/link-ui.css', body)
+                self.assertIn(b'/link-ui.js', body)
+            self.assertEqual(self.request(path, headers={'Host': 'attacker.example'})[0], 403)
+            self.assertEqual(self.request(path, headers={'Origin': 'https://attacker.example'})[0], 403)
+        self.assertEqual(self.request('/api/sessions')[0], 401)
+        self.assertEqual(self.bridge.sent, [])
+
     def test_browser_and_bad_host_pairing_blocked(self):
         self.assertEqual(self.request('/link/pair', self.value, {'Origin': self.base})[0], 403)
         self.assertEqual(self.request('/link/pair', self.value, {'X-Codex-Link': ''})[0], 403)

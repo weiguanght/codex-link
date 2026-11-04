@@ -126,7 +126,7 @@ func pinnedCredential(_ challenge: URLAuthenticationChallenge, endpoint: URL, pi
 final class PinnedAPI: NSObject, URLSessionDelegate, URLSessionTaskDelegate {
     let base: URL
     let pin: String
-    private var session: URLSession!
+    private(set) var session: URLSession!
 
     init(base: URL, pin: String) {
         self.base = base
@@ -134,7 +134,7 @@ final class PinnedAPI: NSObject, URLSessionDelegate, URLSessionTaskDelegate {
         super.init()
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 4
-        config.timeoutIntervalForResource = 6
+        config.timeoutIntervalForResource = 60
         config.httpCookieStorage = nil
         config.urlCache = nil
         config.waitsForConnectivity = false
