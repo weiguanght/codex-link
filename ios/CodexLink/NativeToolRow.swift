@@ -32,6 +32,54 @@ struct NativeToolPresentation {
     var icon: String { kind == "commandExecution" ? "terminal" : kind == "fileChange" ? "doc.badge.gearshape" : "wrench.and.screwdriver" }
 }
 
+/// Unwrap one quoted command argument to a known shell for display only.
+/// Compound invocations retain their original text. Nothing is executed here.
+enum NativeShellCommand {
+    static func display(_ source: String, allowIncomplete: Bool = false) -> String {
+        var index = source.startIndex
+        func skipSpace() { while index < source.endIndex && source[index].isWhitespace { source.formIndex(after: &index) } }
+        func token() -> String {
+            skipSpace(); let start = index
+            while index < source.endIndex && !source[index].isWhitespace { source.formIndex(after: &index) }
+            return String(source[start..<index])
+        }
+        let shell = (token() as NSString).lastPathComponent
+        guard ["zsh", "bash", "sh", "dash", "ksh", "fish"].contains(shell) else { return source }
+        while true {
+            let option = token()
+            if option == "--command" { break }
+            if ["--login", "--interactive", "--noprofile", "--norc"].contains(option) { continue }
+            guard option.hasPrefix("-"), option.count > 1,
+                  option.dropFirst().allSatisfy({ "lic".contains($0) }) else { return source }
+            if option.contains("c") { break }
+        }
+        skipSpace()
+        guard index < source.endIndex, source[index] == "\"" || source[index] == "'" else { return source }
+        var quote: Character?, result = ""
+        while index < source.endIndex {
+            let character = source[index]; source.formIndex(after: &index)
+            if let current = quote {
+                if character == current { quote = nil }
+                else if current == "\"", character == "\\", index < source.endIndex {
+                    let next = source[index]
+                    if "\"\\$`".contains(next) || next == "\n" {
+                        source.formIndex(after: &index)
+                        if next != "\n" { result.append(next) }
+                    } else { result.append(character) }
+                } else { result.append(character) }
+            } else if character == "\"" || character == "'" { quote = character }
+            else if character.isWhitespace {
+                skipSpace()
+                return index == source.endIndex ? result : source
+            } else if character == "\\", index < source.endIndex {
+                result.append(source[index]); source.formIndex(after: &index)
+            } else if ";|&<>()".contains(character) { return source }
+            else { result.append(character) }
+        }
+        return quote == nil || allowIncomplete ? result : source
+    }
+}
+
 /// Every tool uses the chat's single detail sheet; the transcript never embeds output.
 struct NativeToolRow: View {
     let row: NativeRow
@@ -39,7 +87,11 @@ struct NativeToolRow: View {
     let open: () -> Void
     private var presentation: NativeToolPresentation { NativeToolPresentation(row: row, text: text) }
     private var summary: String {
-        let input = presentation.input.components(separatedBy: .newlines).filter { !$0.isEmpty }.joined(separator: " ")
+        let original = presentation.input
+        let command = row.kind == "commandExecution"
+            ? NativeShellCommand.display(original, allowIncomplete: (row.inputLength ?? 0) > original.unicodeScalars.count)
+            : original
+        let input = command.components(separatedBy: .newlines).filter { !$0.isEmpty }.joined(separator: " ")
         return row.kind == "fileChange" ? (row.title ?? "文件变更") : input.isEmpty ? (row.title ?? "工具调用") : input
     }
     var body: some View {

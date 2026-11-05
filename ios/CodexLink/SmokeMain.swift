@@ -41,7 +41,27 @@ final class NativeSmoke: ObservableObject {
     @Published var result = "Testing…"
     init() { let api = NativeAPI(); self.api = api; workspace = WorkspaceModel(api: api); chat = ChatModel(api: api) }
     func require(_ value: Bool, _ message: String) throws { if !value { throw LinkError.message(message) } }
+    private func verifyShellCommandSummary() throws {
+        let commands: [(String, String)] = [
+            (#"/bin/zsh -lc "git status --short""#, "git status --short"),
+            (#"bash -c 'git status --short'"#, "git status --short"),
+            (#"/bin/bash --noprofile --norc -l -c "echo \"quoted\"; printf '%s\n' 中文""#, #"echo "quoted"; printf '%s\n' 中文"#),
+            (#"sh -c 'printf '\''hello'\'''"#, "printf 'hello'"),
+            ("/bin/zsh -lc \"git status --short\nrg -n '代码差异|默认行为|native.settings.commandWrapping' ios/NativeUITests/NativeFlows.swift\"", "git status --short\nrg -n '代码差异|默认行为|native.settings.commandWrapping' ios/NativeUITests/NativeFlows.swift"),
+            ("git status --short", "git status --short"),
+            (#"printf '%s\n' "/bin/zsh -lc""#, #"printf '%s\n' "/bin/zsh -lc""#),
+            (#"zsh -c echo"#, #"zsh -c echo"#),
+            (#"/bin/zsh -lc "echo hi"; echo outside"#, #"/bin/zsh -lc "echo hi"; echo outside"#),
+            (#"/bin/zsh -lc "echo hi" shell-name"#, #"/bin/zsh -lc "echo hi" shell-name"#),
+            (#"/bin/zsh -lc "incomplete"#, #"/bin/zsh -lc "incomplete"#),
+        ]
+        for (source, expected) in commands {
+            try require(NativeShellCommand.display(source) == expected, "Shell command summary changed content: " + source)
+        }
+        try require(NativeShellCommand.display(#"/bin/zsh -lc "incomplete"#, allowIncomplete: true) == "incomplete", "Truncated shell preview kept its wrapper")
+    }
     private func verifyToolRendering() throws {
+        try verifyShellCommandSummary()
         let diff = NativeDiffDocument("""
         Sources/中文 文件.swift
         @@ -10,2 +20,3 @@ func example
