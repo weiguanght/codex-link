@@ -274,7 +274,9 @@ class HistoryCatalog:
                 raise PermissionError('内部或已归档会话不能转换')
             if row.get('originator') in DESKTOP:
                 return row
-            if row.get('originator') != 'codex-tui' or row.get('source') != 'cli':
+            # TUI sessions using the shared app-server daemon record vscode as
+            # their source; originator still identifies the creating CLI client.
+            if row.get('originator') != 'codex-tui' or row.get('source') not in ('cli', 'vscode'):
                 raise PermissionError('仅支持 codex-tui 来源的 CLI 会话')
 
             path = safe_log(self.home, row.get('rollout_path'))
@@ -301,7 +303,7 @@ class HistoryCatalog:
                     originator, source, thread_source, rollout_path = current
                     if originator in DESKTOP:
                         connection.commit()
-                    elif (originator != 'codex-tui' or source != 'cli' or thread_source == 'subagent'
+                    elif (originator != 'codex-tui' or source not in ('cli', 'vscode') or thread_source == 'subagent'
                           or Path(rollout_path).resolve() != path):
                         raise PermissionError('CLI 会话来源或日志路径已变化，已拒绝转换')
                     else:

@@ -2,6 +2,7 @@
 import copy
 import json
 from pathlib import Path
+import sqlite3
 import unittest
 from urllib.parse import urlencode
 
@@ -73,6 +74,9 @@ class NativeHTTPTests(unittest.TestCase):
         self.assertEqual(self.server.bridge.activated, [])
 
     def test_cli_session_converts_on_authenticated_request_and_refreshes_as_writable(self):
+        # TUI sessions created via the shared daemon use source=vscode.
+        with sqlite3.connect(self.server.reading.catalog.home / 'state_5.sqlite') as connection:
+            connection.execute("UPDATE threads SET source = 'vscode' WHERE id = ?", (history.uid(1),))
         path = '/api/sessions/' + history.uid(1)
         self.assertEqual(self.request(path + '/convert', {}, {'Origin': self.base})[0], 401)
         headers = self.authenticate()

@@ -168,6 +168,34 @@ class CatalogTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             library.convert_cli_to_desktop(uid(2))
 
+    def test_tui_with_vscode_source_converts_and_preserves_history(self):
+        db = database(self.home, [{'number': 1, 'source': 'vscode'}])
+        path = log(self.home, 1, message('user', 'TUI using the shared daemon'))
+        original_log = path.read_bytes()
+        library = ReadingLibrary(SpyBridge(self.home))
+        self.assertTrue(library.metadata(uid(1))['readOnly'])
+        result = library.convert_cli_to_desktop(uid(1))
+        self.assertFalse(result['readOnly'])
+        self.assertEqual(path.read_bytes(), original_log)
+        with sqlite3.connect(db) as connection:
+            self.assertEqual(connection.execute('SELECT originator, source FROM threads WHERE id = ?', (uid(1),)).fetchone(), ('Codex Desktop', 'vscode'))
+
+    def test_conversion_rejects_other_originators_and_internal_sources(self):
+        db = database(self.home, [
+            {'number': 1, 'originator': 'codex_exec', 'source': 'vscode'},
+            {'number': 2, 'source': 'unknown'},
+            {'number': 3, 'source': 'vscode', 'thread_source': 'subagent'},
+            {'number': 4, 'source': 'vscode', 'archived': 1},
+        ])
+        for number in range(1, 5):
+            log(self.home, number)
+        original = db.read_bytes()
+        library = ReadingLibrary(SpyBridge(self.home))
+        for number in range(1, 5):
+            with self.subTest(number=number), self.assertRaises(PermissionError):
+                library.convert_cli_to_desktop(uid(number))
+        self.assertEqual(db.read_bytes(), original)
+
     def test_wrong_log_id_is_unreadable_until_matching_fallback_exists(self):
         wrong = log(self.home, 2)
         database(self.home, [{'number': 1, 'rollout_path': str(wrong)}])
