@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a dependency-free Xcode project (no CocoaPods / xcodegen)."""
+"""Generate the Xcode project with vendored local Swift packages."""
 import hashlib
 from pathlib import Path
 
@@ -31,7 +31,13 @@ def main():
     obj('main', f'isa = PBXGroup; sourceTree = "<group>"; children = ({identifier("sourcegroup")},{identifier("products")},);')
     obj('sources', f'isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ({",".join(builds)},); runOnlyForDeploymentPostprocessing = 0;')
     obj('resources', f'isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ({identifier("assetsbuild")},); runOnlyForDeploymentPostprocessing = 0;')
-    obj('frameworks', 'isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;')
+    packages = ['Runestone'] + ['TreeSitter' + language + 'Runestone' for language in
+        ('Bash', 'C', 'CSS', 'HTML', 'JavaScript', 'JSON', 'Python', 'Rust', 'Swift', 'TOML', 'TypeScript', 'TSX', 'YAML', 'Markdown', 'MarkdownInline')]
+    obj('editorpackage', 'isa = XCLocalSwiftPackageReference; relativePath = Packages/Runestone;')
+    for product in packages:
+        obj('packageproduct:' + product, f'isa = XCSwiftPackageProductDependency; productName = {product};')
+        obj('packagebuild:' + product, f'isa = PBXBuildFile; productRef = {identifier("packageproduct:" + product)};')
+    obj('frameworks', f'isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = ({",".join(identifier("packagebuild:" + p) for p in packages)},); runOnlyForDeploymentPostprocessing = 0;')
     for name in ('Debug', 'Release'):
         obj('project' + name, f'isa = XCBuildConfiguration; name = {name}; buildSettings = {{ SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 16.0; CLANG_ENABLE_MODULES = YES; SWIFT_VERSION = 5.0; }};')
         obj('target' + name, f'''isa = XCBuildConfiguration; name = {name}; buildSettings = {{
@@ -50,7 +56,7 @@ def main():
         productType = "com.apple.product-type.application"; productReference = {identifier('app')};
         buildConfigurationList = {identifier('targetconfigs')};
         buildPhases = ({identifier('sources')},{identifier('frameworks')},{identifier('resources')},);
-        buildRules = (); dependencies = ();''')
+        buildRules = (); dependencies = (); packageProductDependencies = ({",".join(identifier("packageproduct:" + p) for p in packages)},);''')
     obj('uitestref', 'isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeFlows.swift; sourceTree = "<group>";')
     obj('uitestbuild', f'isa = PBXBuildFile; fileRef = {identifier("uitestref")};')
     obj('uitestgroup', f'isa = PBXGroup; path = NativeUITests; sourceTree = "<group>"; children = ({identifier("uitestref")},);')
@@ -76,7 +82,7 @@ def main():
         buildConfigurationList = {identifier('projectconfigs')}; compatibilityVersion = "Xcode 14.0";
         developmentRegion = zh_CN; hasScannedForEncodings = 0; knownRegions = (zh_CN,en,Base,);
         mainGroup = {identifier('main')}; productRefGroup = {identifier('products')};
-        projectDirPath = ""; projectRoot = ""; targets = ({identifier('target')},{identifier('uitesttarget')},);''')
+        projectDirPath = ""; projectRoot = ""; packageReferences = ({identifier('editorpackage')},); targets = ({identifier('target')},{identifier('uitesttarget')},);''')
     project = ROOT / 'ios/codex-link.xcodeproj'
     project.mkdir(exist_ok=True)
     (project / 'project.pbxproj').write_text('// !$*UTF8*$!\n{ archiveVersion = 1; classes = {}; objectVersion = 56; objects = {\n' + '\n'.join(objects) + f'\n}}; rootObject = {identifier("project")}; }}\n')

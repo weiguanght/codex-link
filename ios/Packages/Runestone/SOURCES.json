@@ -1,0 +1,32 @@
+{
+  "runestoneSource": "/Users/hoto/Downloads/codex-mobile-assistant/Runestone",
+  "dependencies": [
+    {
+      "repository": "tree-sitter/tree-sitter",
+      "revision": "v0.25.3",
+      "archiveSHA256": "862fac52653bc7bc9d2cd0630483e6bdf3d02bcd23da956ca32663c4798a93e3"
+    },
+    {
+      "repository": "simonbs/TreeSitterLanguages",
+      "revision": "12e38d632d845ba6e94eff02de53418963a98506",
+      "archiveSHA256": "e4773125b28981541c5fa05044d660a6f98361bbe21e934a218e8ebbbbf71dde"
+    }
+  ],
+  "languages": [
+    "Bash",
+    "C",
+    "CSS",
+    "HTML",
+    "JavaScript",
+    "JSON",
+    "Python",
+    "Rust",
+    "Swift",
+    "TOML",
+    "TypeScript",
+    "TSX",
+    "YAML",
+    "Markdown",
+    "MarkdownInline"
+  ]
+}

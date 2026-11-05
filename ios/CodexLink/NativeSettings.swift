@@ -5,6 +5,8 @@ struct NativeAppSettings: View {
     @ObservedObject var workspace: WorkspaceModel
     @Environment(\.dismiss) private var dismiss
     @AppStorage("native.appearance") private var appearance = "system"
+    @AppStorage("native.followUpBehavior") private var followUpBehavior = "send"
+    @AppStorage("native.diffLineWrapping") private var diffLineWrapping = true
     @State private var forget = false
     var body: some View {
         Form {
@@ -24,6 +26,16 @@ struct NativeAppSettings: View {
             }
             Section("外观") {
                 Picker("主题", selection: $appearance) { Text("跟随系统").tag("system"); Text("浅色").tag("light"); Text("深色").tag("dark") }
+            }
+            Section {
+                Picker("后续消息默认方式", selection: $followUpBehavior) {
+                    Text("发送新消息").tag("send")
+                    Text("完成后发送").tag("queue")
+                    Text("补充当前任务").tag("steer")
+                }
+                Toggle("Diff 长行自动换行", isOn: $diffLineWrapping)
+            } header: { Text("任务与阅读") } footer: {
+                Text("默认方式用于尚无草稿的新会话，当前会话仍可单独选择。输入草稿只保存在此设备；忘记 Mac 时一并清除。")
             }
             Section("连接") {
                 Label(connection.status, systemImage: connection.online ? "checkmark.circle" : "network.slash").font(.subheadline)

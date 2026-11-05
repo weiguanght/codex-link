@@ -20,7 +20,9 @@ class NativeHTTPTests(unittest.TestCase):
     def setUp(self):
         support.HTTPTests.setUp(self)
         home = Path(self.temp.name) / 'codex'; home.mkdir()
-        history.database(home, [{'number': 1}, {'number': 2, 'originator': 'Codex Desktop'}])
+        self.folder = Path(self.temp.name) / 'workspace'; self.folder.mkdir()
+        (self.folder / 'example.txt').write_text('Synthetic file preview')
+        history.database(home, [{'number': 1, 'cwd': str(self.folder)}, {'number': 2, 'cwd': str(self.folder), 'originator': 'Codex Desktop'}])
         history.log(home, 1, history.message('user', 'A synthetic question') + history.message('assistant', 'A synthetic answer'))
         history.log(home, 2, history.message('user', 'Desktop log'))
         bridge = history.SpyBridge(home)
@@ -82,6 +84,38 @@ class NativeHTTPTests(unittest.TestCase):
         self.assertFalse(capabilities({})['send'])
         self.assertFalse(capabilities({'host': 'ssh', 'readOnly': False})['archive'])
         self.assertTrue(capabilities({'host': 'local', 'readOnly': False})['send'])
+
+    def test_workspace_reads_are_scoped_authenticated_and_do_not_activate(self):
+        path = '/api/native/v1/threads/' + history.uid(2) + '/workspace/'
+        self.assertEqual(self.request(path + 'tree')[0], 401)
+        headers = self.authenticate()
+        code, value, _ = self.request(path + 'tree', headers=headers)
+        self.assertEqual(code, 200)
+        self.assertEqual([r['name'] for r in value['entries']], ['example.txt'])
+        code, value, _ = self.request(path + 'file?path=example.txt', headers=headers)
+        self.assertEqual(code, 200); self.assertEqual(value['text'], 'Synthetic file preview')
+        self.assertEqual(self.request(path + 'file?' + urlencode({'path': '../server.key'}), headers=headers)[0], 400)
+        self.assertEqual(self.request(path + 'tree', {}, headers)[0], 405)
+        self.assertEqual(self.request(path + 'tree', headers={**headers, 'Origin': 'https://other.invalid'})[0], 403)
+        self.assertEqual(self.request('/api/native/v1/threads/' + history.uid(1) + '/workspace/tree', headers=headers)[0], 403)
+        self.assertEqual(self.request(path + 'tree?view=log', headers=headers)[0], 403)
+        self.assertEqual(self.server.bridge.activated, [])
+        self.assertEqual(self.calls, [])
+
+    def test_workspace_write_is_authenticated_scoped_and_conflict_checked(self):
+        path = '/api/native/v1/threads/' + history.uid(2) + '/workspace/file'
+        headers = self.authenticate()
+        _, current, _ = self.request(path + '?path=example.txt', headers=headers)
+        body = {'path': 'example.txt', 'text': 'Edited from phone', 'revision': current['revision']}
+        self.assertEqual(self.request(path, body, {'Cookie': self.cookie, 'Origin': self.base})[0], 403)
+        self.assertEqual(self.request(path, body, {**headers, 'Origin': 'https://other.invalid'})[0], 403)
+        self.assertEqual(self.request(path.replace(history.uid(2), history.uid(1)), body, headers)[0], 403)
+        code, saved, _ = self.request(path, body, headers)
+        self.assertEqual(code, 200); self.assertNotEqual(saved['revision'], current['revision'])
+        self.assertEqual((self.folder / 'example.txt').read_text(), 'Edited from phone')
+        code, error, _ = self.request(path, body, headers)
+        self.assertEqual(code, 409); self.assertEqual(error['code'], 'conflict')
+        self.assertEqual(self.server.bridge.activated, [])
 
     def test_native_sources_do_not_embed_web_ui(self):
         root = Path(__file__).resolve().parents[1] / 'ios/CodexLink'

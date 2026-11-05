@@ -35,8 +35,9 @@ struct NativeNotice: View {
         }
     }
 }
-struct NativeMarkdown: View {
+struct NativeChatMarkdown: View {
     let text: String
+    @AppStorage("native.diffLineWrapping") private var diffLineWrapping = true
     private struct Block: Identifiable {
         let id: Int
         let content: String
@@ -63,7 +64,11 @@ struct NativeMarkdown: View {
                             Spacer()
                             Button { UIPasteboard.general.string = block.content } label: { Label("复制", systemImage: "doc.on.doc").font(.caption) }.buttonStyle(.plain)
                         }
-                        ScrollView(.horizontal) { Text(block.content).font(.system(.callout, design: .monospaced)).textSelection(.enabled).fixedSize(horizontal: true, vertical: false) }
+                        if ["diff", "patch"].contains(block.language.trimmingCharacters(in: .whitespaces).lowercased()) {
+                            NativeDiff(content: block.content, wrapsLines: diffLineWrapping)
+                        } else {
+                            NativeCodeBlock(text: block.content, language: block.language)
+                        }
                     }.padding(14).background(Color.linkSurface, in: RoundedRectangle(cornerRadius: 16))
                 } else {
                     // Foundation Markdown handles emphasis and links; block rows
@@ -75,7 +80,7 @@ struct NativeMarkdown: View {
                     }.textSelection(.enabled)
                 }
             }
-        }.frame(maxWidth: .infinity, alignment: .leading)
+        }.frame(maxWidth: .infinity, alignment: .leading).tint(.blue)
     }
     @ViewBuilder private func markdownLine(_ line: String) -> some View {
         let heading = line.prefix(while: { $0 == "#" }).count
@@ -90,14 +95,58 @@ struct NativeMarkdown: View {
         } else if line.isEmpty { Color.clear.frame(height: 5) }
         else { Text(inline(line)).frame(maxWidth: .infinity, alignment: .leading) }
     }
-    private func inline(_ value: String) -> AttributedString {
-        (try? AttributedString(markdown: value, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(value)
+    private func inline(_ value: String) -> AttributedString { NativeMessageLinks.attributed(value) }
+}
+
+enum NativeMessageLinks {
+    // Encode local destinations before Foundation parses Markdown: unescaped
+    // spaces and Unicode paths otherwise lose their link attributes. Leave
+    // inline code untouched, and resolve downloads only against chat.files.
+    static func attributed(_ value: String) -> AttributedString {
+        let pattern = #"(`+).*?\1|(!?\[[^\]\n]*\])\((?:<([^>\n]+)>|([^\n)]+))\)"#
+        let expression = try! NSRegularExpression(pattern: pattern)
+        let source = value as NSString
+        var markdown = value
+        for match in expression.matches(in: value, range: NSRange(location: 0, length: source.length)).reversed() {
+            guard match.range(at: 2).location != NSNotFound else { continue }
+            let targetRange = match.range(at: 3).location != NSNotFound ? match.range(at: 3) : match.range(at: 4)
+            let reference = source.substring(with: targetRange).trimmingCharacters(in: .whitespaces)
+            guard isLocal(reference), let url = url(reference: reference), let range = Range(match.range, in: markdown) else { continue }
+            markdown.replaceSubrange(range, with: source.substring(with: match.range(at: 2)) + "(" + url.absoluteString + ")")
+        }
+        var result = (try? AttributedString(markdown: markdown, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(value)
+        for run in result.runs where run.link != nil {
+            result[run.range].foregroundColor = .blue
+            result[run.range].underlineStyle = .single
+        }
+        return result
+    }
+    static func isLocal(_ reference: String) -> Bool { reference.hasPrefix("/") || reference.lowercased().hasPrefix("file://") }
+    static func url(reference: String) -> URL? {
+        let safe = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")
+        guard let encoded = reference.addingPercentEncoding(withAllowedCharacters: safe) else { return nil }
+        return URL(string: "codex-link-file://open?reference=" + encoded)
+    }
+    static func reference(_ url: URL) -> String? {
+        if url.scheme == "codex-link-file", url.host == "open" {
+            return URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "reference" }?.value
+        }
+        return isLocal(url.absoluteString) ? url.absoluteString : nil
+    }
+    static func normalized(_ reference: String) -> String {
+        if reference.lowercased().hasPrefix("file://"), let url = URL(string: reference) { return url.path }
+        return reference.removingPercentEncoding ?? reference
+    }
+    static func file(for url: URL, files: [JSONValue]) -> JSONValue? {
+        guard let target = reference(url) else { return nil }
+        return files.first { normalized($0["reference"].string) == normalized(target) }
     }
 }
 struct ShareView: UIViewControllerRepresentable {
     let file: URL
     func makeUIViewController(context: Context) -> UIActivityViewController {
         let controller = UIActivityViewController(activityItems: [file], applicationActivities: nil)
+        controller.view.accessibilityIdentifier = "native.file.share"
         controller.completionWithItemsHandler = { _, _, _, _ in try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
         return controller
     }

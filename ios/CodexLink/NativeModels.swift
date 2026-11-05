@@ -60,14 +60,6 @@ struct PendingAttachment: Identifiable {
     let name: String
     let size: Int
 }
-struct ChatDraft {
-    var text = ""
-    var attachments: [PendingAttachment] = []
-    var workMode = "default"
-    var sendMode = "send"
-    var skills: [String] = []
-    var attempt: (payload: JSONValue, id: String)?
-}
 
 @MainActor
 final class ChatModel: ObservableObject {
@@ -85,7 +77,8 @@ final class ChatModel: ObservableObject {
     @Published var notice = ""
     @Published var pollingError = ""
     @Published var hasMore = false
-    @Published var draft = ChatDraft()
+    @Published var draft = ChatDraft() { didSet { scheduleDraftSave() } }
+    @Published private(set) var draftStorageError = ""
     @Published var logView = false
     @Published var revision = 0
     private var drafts: [String: ChatDraft] = [:]
@@ -96,7 +89,56 @@ final class ChatModel: ObservableObject {
     private var details: [String: (version: JSONValue, text: String, next: Int?)] = [:]
     private var responded = Set<String>()
     private var autoSend = Set<String>()
-    init(api: NativeAPI) { self.api = api }
+    private let draftStore: DraftStore
+    private var draftScope: String?
+    private var draftSaveTask: Task<Void, Never>?
+    private var isRestoringDraft = false
+    private var unreadableDrafts = Set<String>()
+    init(api: NativeAPI, draftStore: DraftStore = .shared, draftScope: String? = nil) {
+        self.api = api; self.draftStore = draftStore; self.draftScope = draftScope
+    }
+    func setDraftScope(_ scope: String?) {
+        guard scope != draftScope else { return }
+        flushDraft(); clear(); draftScope = scope
+        unreadableDrafts = []; draftStorageError = ""
+    }
+    private func scheduleDraftSave() {
+        guard !isRestoringDraft else { return }
+        draftSaveTask?.cancel()
+        guard let session, draftScope != nil else { return }
+        // Only an actual composer edit may replace an unreadable saved draft.
+        unreadableDrafts.remove(session.identity)
+        draftSaveTask = Task { [weak self] in
+            do { try await Task.sleep(nanoseconds: 300_000_000) } catch { return }
+            self?.flushDraft()
+        }
+    }
+    func flushDraft() {
+        draftSaveTask?.cancel(); draftSaveTask = nil
+        guard let session else { return }
+        saveDraft(draft, for: session.identity)
+    }
+    private func saveDraft(_ value: ChatDraft, for identity: String) {
+        drafts[identity] = value
+        guard let draftScope, !unreadableDrafts.contains(identity) else { return }
+        do { try draftStore.save(value, scope: draftScope, identity: identity); draftStorageError = "" }
+        catch { draftStorageError = "本机草稿未保存：" + error.localizedDescription }
+    }
+    private func restoredDraft(for identity: String) -> ChatDraft {
+        if let value = drafts[identity] { return value }
+        guard let draftScope else { return ChatDraft() }
+        do { return try draftStore.load(scope: draftScope, identity: identity) ?? ChatDraft() }
+        catch { unreadableDrafts.insert(identity); draftStorageError = "本机草稿无法读取：" + error.localizedDescription; return ChatDraft() }
+    }
+    func forgetDrafts() {
+        draftSaveTask?.cancel(); draftSaveTask = nil
+        if let draftScope {
+            do { try draftStore.forget(scope: draftScope); draftStorageError = "" }
+            catch { draftStorageError = "本机草稿未能清除：" + error.localizedDescription }
+        }
+        // Detach before clearing so no delayed write can recreate forgotten data.
+        draftScope = nil; unreadableDrafts = []; clear()
+    }
     var readOnly: Bool { capabilities["readOnly"].bool || logView || session?.readOnly == true }
     var connected: Bool { meta["connected"].bool && !readOnly }
     var running: Bool { meta["status"].string == "active" }
@@ -111,7 +153,7 @@ final class ChatModel: ObservableObject {
     private func path(_ action: String) -> String { "/api/native/v1/threads/\(session!.id)/\(action)" }
     private func actionPath(_ action: String) -> String { "/api/sessions/\(session!.id)/\(action)" }
     func primeDraft(_ text: String, for target: LinkSession) {
-        var value = drafts[target.identity] ?? ChatDraft(); value.text = text; drafts[target.identity] = value
+        var value = restoredDraft(for: target.identity); value.text = text; saveDraft(value, for: target.identity)
         if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { autoSend.insert(target.identity) }
     }
     private func sendPrimedDraftIfReady() async {
@@ -121,10 +163,12 @@ final class ChatModel: ObservableObject {
     }
 
     func run(_ target: LinkSession?) async {
-        if let old = session { drafts[old.identity] = draft }
+        flushDraft()
         generation += 1; let token = generation
         session = target; rows = []; files = []; details = [:]; meta = .null; capabilities = .null; epoch = ""; sequence = -1; before = nil; error = ""; pollingError = ""; notice = ""; responded = []; loadingOlder = false
-        draft = target.flatMap { drafts[$0.identity] } ?? ChatDraft()
+        isRestoringDraft = true
+        draft = target.map { restoredDraft(for: $0.identity) } ?? ChatDraft()
+        isRestoringDraft = false
         guard target != nil else { loading = false; return }
         loading = true
         do { let page: TimelinePage = try await api.request(path("timeline"), query: params()); guard token == generation, !Task.isCancelled else { return }; apply(page, replace: true); await sendPrimedDraftIfReady() }
@@ -145,7 +189,8 @@ final class ChatModel: ObservableObject {
         if replace { rows = []; details = [:]; epoch = page.epoch }
         var mapping = Dictionary(uniqueKeysWithValues: rows.map { ($0.key, $0) })
         for row in page.rows { mapping[row.key] = row }
-        rows = mapping.values.sorted { $0.order == $1.order ? $0.key < $1.key : $0.order < $1.order }
+        let updated = mapping.values.sorted { $0.order == $1.order ? $0.key < $1.key : $0.order < $1.order }
+        if rows != updated { rows = updated }
         if !older || replace { meta = page.meta; capabilities = page.capabilities; sequence = page.sequence }
         if replace || older { before = page.before; hasMore = page.hasMore ?? false }
         var artifacts = Dictionary(uniqueKeysWithValues: files.map { ($0["id"].string, $0) })
@@ -186,7 +231,8 @@ final class ChatModel: ObservableObject {
             "attachments": .array(draft.attachments.map { string($0.id) }), "uiLocale": string("zh-CN")]
         if draft.sendMode != "steer" { fields["workMode"] = string(draft.workMode) }
         let payload = json(fields)
-        if draft.attempt?.payload != payload { draft.attempt = (payload, UUID().uuidString.lowercased()) }
+        if draft.attempt?.payload != payload { draft.attempt = DraftSendAttempt(payload: payload, id: UUID().uuidString.lowercased()) }
+        flushDraft()
         let submitted = draft
         fields["id"] = string(submitted.attempt!.id)
         sending.insert(target.identity); error = ""; notice = ""
@@ -204,7 +250,8 @@ final class ChatModel: ObservableObject {
             let sentFiles = Set(submitted.attachments.map(\.id))
             latest.attachments.removeAll { sentFiles.contains($0.id) }
             if latest.attempt?.id == submitted.attempt?.id { latest.attempt = nil }
-            drafts[target.identity] = latest
+            latest.recoveryNotice = ""
+            saveDraft(latest, for: target.identity)
             if current { draft = latest; notice = result["status"].string == "queued" ? "已加入待发送队列" : "消息已提交" }
         } catch { if session?.identity == target.identity { self.error = error.localizedDescription + "。草稿已保留，可重试同一请求。" } }
     }
@@ -228,5 +275,11 @@ final class ChatModel: ObservableObject {
         responded.insert(id.identifier); revision += 1
     }
     func preserveDraft(_ text: String, for target: LinkSession) { primeDraft(text, for: target); autoSend.remove(target.identity) }
-    func clear() { generation += 1; sending = []; autoSend = []; drafts = [:]; draft = ChatDraft(); session = nil; rows = []; meta = .null; files = []; logView = false }
+    @discardableResult func appendWorkspaceContext(_ text: String, for target: LinkSession) -> Bool {
+        guard !readOnly, session?.identity == target.identity, !text.isEmpty else { return false }
+        draft.text += (draft.text.isEmpty ? "" : "\n\n") + text
+        flushDraft()
+        return true
+    }
+    func clear() { flushDraft(); draftSaveTask?.cancel(); draftSaveTask = nil; generation += 1; sending = []; autoSend = []; drafts = [:]; session = nil; draft = ChatDraft(); rows = []; meta = .null; files = []; logView = false }
 }

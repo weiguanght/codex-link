@@ -50,6 +50,10 @@ class Timeline:
                 activity = message['role'] == 'activity'
                 version = hashlib.sha256(text.encode()).hexdigest()[:24]
                 row = {k: message[k] for k in ('role', 'kind', 'status', 'title', 'phase', 'requestId') if k in message}
+                if activity:
+                    row['inputLength'] = len(message.get('text') or '')
+                    for field in ('exitCode', 'durationMs'):
+                        if message.get(field) is not None: row[field] = message[field]
                 row.update(key=key, turnId=turn['id'], order=len(rows), version=version,
                            text=text[:180 if activity else TEXT_PREVIEW],
                            truncated=activity or len(text) > TEXT_PREVIEW, turnStatus=turn.get('status'),

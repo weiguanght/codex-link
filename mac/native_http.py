@@ -4,9 +4,11 @@ from urllib.parse import parse_qs, urlsplit
 from bridge.store import StoreUnavailable
 from bridge.remote import RemoteUnavailable
 from .history_catalog import HistoryUnavailable
+from .workspace_reader import WorkspaceReader, WorkspaceConflictError
 
 ROOT = '/api/native/v1'
 THREAD = re.compile(r'^/api/native/v1/threads/([0-9a-f-]{36})/(timeline|changes|detail)$')
+WORKSPACE = re.compile(r'^/api/native/v1/threads/([0-9a-f-]{36})/workspace/(tree|search|file|changes|patch)$')
 
 
 def capabilities(row):
@@ -14,7 +16,9 @@ def capabilities(row):
     return {'readOnly': not control, 'send': control, 'stop': control, 'respond': control,
             'attachments': control, 'rename': control, 'threadSettings': control,
             'archive': control and row.get('host') == 'local', 'pin': True, 'hide': True,
-            'fullLog': row.get('host') == 'local' and row.get('historyReadable', False)}
+            'fullLog': row.get('host') == 'local' and row.get('historyReadable', False),
+            'workspaceRead': control and row.get('host') == 'local' and bool(row.get('cwd')),
+            'workspaceWrite': control and row.get('host') == 'local' and bool(row.get('cwd'))}
 
 
 def handle(handler, write, path):
@@ -23,7 +27,8 @@ def handle(handler, write, path):
     try:
         handler.check_request(write)
         if not handler.authorized(write): return True
-        if write:
+        writable_file = WORKSPACE.fullmatch(path)
+        if write and not (writable_file and writable_file.group(2) == 'file'):
             handler.close_connection = True
             handler.output(405, {'error': '此版本原生投影接口只接受 GET；写操作使用已认证的会话接口'})
             return True
@@ -36,7 +41,8 @@ def handle(handler, write, path):
                       'transport': 'cursor-poll', 'threadWrites': '/api/sessions/{id}/{action}',
                       'settings': '/api/codex-settings', 'projects': '/api/workspace/projects'}
         else:
-            match = THREAD.fullmatch(path)
+            workspace_match = WORKSPACE.fullmatch(path)
+            match = workspace_match or THREAD.fullmatch(path)
             if not match:
                 handler.output(404, {'error': '原生接口不存在'}); return True
             query = parse_qs(urlsplit(handler.path).query)
@@ -44,6 +50,20 @@ def handle(handler, write, path):
             key, action = match.groups()
             row = library.metadata(key, value('host', 'local'))
             explicit_log = value('view') == 'log'
+            if workspace_match:
+                if row.get('readOnly', True) or row['host'] != 'local' or explicit_log:
+                    raise PermissionError('此视图不支持读取当前工作区；请打开本机桌面会话')
+                reader = WorkspaceReader(row.get('cwd'))
+                if write:
+                    body = handler.read_json()
+                    result = reader.save(body.get('path'), body.get('text'), body.get('revision'))
+                elif action == 'tree': result = reader.tree(value('path'), int(value('offset', '0')))
+                elif action == 'search': result = reader.search(value('q'))
+                elif action == 'file': result = reader.file(value('path'))
+                elif action == 'changes': result = reader.changes(value('source', 'unstaged'))
+                else: result = reader.patch(value('path'), value('source', 'unstaged'))
+                handler.output(200, result)
+                return True
             if explicit_log and row['host'] != 'local': raise PermissionError('远程日志视图尚未支持')
             read_only = row.get('readOnly') or explicit_log
             if action == 'detail':
@@ -64,6 +84,8 @@ def handle(handler, write, path):
                 if read_only:
                     result['meta'].update(connected=False, requests=[], submissions=[])
         handler.output(200, result)
+    except WorkspaceConflictError as exc:
+        handler.close_connection = True; handler.output(409, {'error': str(exc), 'code': 'conflict'})
     except PermissionError as exc:
         handler.close_connection = True; handler.output(403, {'error': str(exc)})
     except KeyError:

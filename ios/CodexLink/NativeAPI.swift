@@ -89,6 +89,10 @@ struct NativeRow: Decodable, Identifiable, Equatable {
     let editable: Bool?
     let forkable: Bool?
     let attachments: [JSONValue]?
+    let status: String?
+    let inputLength: Int?
+    let exitCode: Int?
+    let durationMs: Int?
     var id: String { key }
     var isProcess: Bool { role == "activity" }
 }

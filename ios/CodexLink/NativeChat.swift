@@ -15,7 +15,11 @@ struct NativeChatView: View {
     @State private var actionError = ""
     @State private var share: ShareFile?
     @State private var messageAction: NativeRow?
+    @State private var workspaceSession: LinkSession?
     @State private var following = true
+    @State private var draggingHistory = false
+    @State private var bottomPosition: CGFloat?
+    @State private var scrollRequest = 0
     @State private var homeMode = 0
     @State private var taskPrompt = ""
     @State private var projectSort = "tasks"
@@ -45,6 +49,11 @@ struct NativeChatView: View {
         .sheet(isPresented: $status) { threadStatus }
         .sheet(item: $share) { ShareView(file: $0.url) }
         .sheet(item: $messageAction) { NativeMessageAction(chat: chat, row: $0, workspace: workspace) }
+        .sheet(item: $workspaceSession) { session in
+            NativeWorkspaceBrowser(api: chat.api, session: session, canEdit: chat.capabilities["workspaceWrite"].bool) { text in
+                if chat.appendWorkspaceContext(text, for: session) { focused = true }
+            }
+        }
         .fileImporter(isPresented: $importFile, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             switch result {
             case .success(let urls): uploading = true; Task { defer { uploading = false }; do { for url in urls { try await chat.upload(url) } } catch { actionError = error.localizedDescription } }
@@ -52,12 +61,16 @@ struct NativeChatView: View {
             }
         }
         .alert("操作失败", isPresented: Binding(get: { !actionError.isEmpty }, set: { if !$0 { actionError = "" } })) { Button("好", role: .cancel) {} } message: { Text(actionError) }
-        .onChange(of: chat.session?.identity) { _ in following = true; focused = false }
+        .onChange(of: chat.session?.identity) { _ in following = true; draggingHistory = false; bottomPosition = nil; focused = false; workspaceSession = nil }
         .environment(\.openURL, OpenURLAction { url in
-            if let file = chat.files.first(where: { $0["reference"].string == url.absoluteString || $0["reference"].string == url.path }) {
+            if let file = NativeMessageLinks.file(for: url, files: chat.files) {
                 download(file); return .handled
             }
-            return ["https", "http"].contains(url.scheme ?? "") ? .systemAction : .discarded
+            if NativeMessageLinks.reference(url) != nil {
+                actionError = "此文件已不可用，或不在当前会话可下载的文件列表中。"
+                return .handled
+            }
+            return ["https", "http"].contains(url.scheme?.lowercased() ?? "") ? .systemAction : .discarded
         })
     }
     @ToolbarContentBuilder private var navigationControls: some ToolbarContent {
@@ -73,6 +86,9 @@ struct NativeChatView: View {
                 }.buttonStyle(.plain).accessibilityLabel("会话状态与详情")
             }
             ToolbarItem(placement: .navigationBarTrailing) {
+                if chat.capabilities["workspaceRead"].bool {
+                    NativeIconButton(symbol: "folder", label: "浏览工作区", action: { workspaceSession = chat.session }).accessibilityIdentifier("native.workspace.open")
+                }
                 NativeIconButton(symbol: "square.and.pencil", label: "新建对话", action: { onNewChat("") })
             }
     }
@@ -171,26 +187,45 @@ struct NativeChatView: View {
                         NativeNotice(text: chat.pollingError, isError: true)
                         NativeNotice(text: chat.error, isError: true)
                         NativeNotice(text: chat.notice)
+                        NativeNotice(text: chat.draft.recoveryNotice)
+                        NativeNotice(text: chat.draftStorageError, isError: true)
                         Color.clear.frame(height: 1).id("native-bottom").background(GeometryReader { geometry in Color.clear.preference(key: BottomPosition.self, value: geometry.frame(in: .named("native-transcript")).maxY) })
                     }.padding(.horizontal, 22).padding(.vertical, 24).frame(maxWidth: 820).frame(maxWidth: .infinity)
                 }
+                .accessibilityIdentifier("native.transcript")
                 .coordinateSpace(name: "native-transcript")
-                .onPreferenceChange(BottomPosition.self) { bottom in following = bottom < viewport.size.height + 75 }
+                .onPreferenceChange(BottomPosition.self) { bottom in
+                    bottomPosition = bottom
+                    // A lazily removed bottom marker has no position; it is not at y = 0.
+                    guard let bottom else { return }
+                    // Content growth must not turn off an existing follow request.
+                    // Only a user's drag or history action pauses following.
+                    if !draggingHistory && bottom >= 0 && bottom <= viewport.size.height + 75 { following = true }
+                }
+                .simultaneousGesture(DragGesture().onChanged { _ in
+                    draggingHistory = true; following = false
+                }.onEnded { _ in
+                    draggingHistory = false
+                    following = bottomPosition.map { $0 >= 0 && $0 <= viewport.size.height + 75 } ?? false
+                })
                 .scrollDismissesKeyboard(.interactively)
-                .onChange(of: chat.revision) { _ in if following && !chat.loadingOlder { proxy.scrollTo("native-bottom", anchor: .bottom) } }
+                .onChange(of: chat.visibleRows) { _ in if following && !chat.loadingOlder { scrollRequest += 1 } }
+                .onChange(of: chat.loading) { loading in if !loading && following { scrollRequest += 1 } }
+                .onChange(of: chat.notice) { notice in if !notice.isEmpty && following { scrollRequest += 1 } }
+                .task(id: scrollRequest) {
+                    guard scrollRequest > 0 else { return }
+                    // Wait for LazyVStack to lay out the updated footer before locating it.
+                    do { try await Task.sleep(nanoseconds: 80_000_000) } catch { return }
+                    if following && !draggingHistory && !chat.loadingOlder { proxy.scrollTo("native-bottom", anchor: .bottom) }
+                }
                 .overlay(alignment: .bottomTrailing) {
                     if !following { NativeIconButton(symbol: "arrow.down", label: "回到最新消息", filled: true) { following = true; withAnimation { proxy.scrollTo("native-bottom", anchor: .bottom) } }.padding(16) }
                 }
-                .safeAreaInset(edge: .bottom, spacing: 0) { composer }
             }
-        }
+        }.safeAreaInset(edge: .bottom, spacing: 0) { composer }
     }
     private func processRow(_ row: NativeRow) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(row.title ?? row.kind ?? "执行过程").font(.caption.weight(.semibold))
-            Text(chat.rowText(row)).font(.system(.caption, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-            if chat.rowHasMore(row) { Button("展开完整内容") { perform { try await chat.expand(row) } }.font(.caption) }
-        }
+        NativeToolRow(row: row, text: chat.rowText(row), hasMore: chat.rowHasMore(row)) { perform { try await chat.expand(row) } }
     }
     private func message(_ row: NativeRow) -> some View {
         VStack(alignment: row.role == "user" ? .trailing : .leading, spacing: 10) {
@@ -198,7 +233,7 @@ struct NativeChatView: View {
                 Text(chat.rowText(row)).font(.system(size: 16)).lineSpacing(5).textSelection(.enabled)
                     .padding(.horizontal, 18).padding(.vertical, 14).background(Color.linkSurface, in: RoundedRectangle(cornerRadius: 24)).padding(.leading, 30)
             } else if row.role == "error" { NativeNotice(text: chat.rowText(row), isError: true) }
-            else { NativeMarkdown(text: chat.rowText(row)).font(.system(size: 16)).lineSpacing(5) }
+            else { NativeChatMarkdown(text: chat.rowText(row)).font(.system(size: 16)).lineSpacing(5) }
             if let attachments = row.attachments {
                 ForEach(Array(attachments.enumerated()), id: \.offset) { _, a in Label(a["name"].string.isEmpty ? "附件" : a["name"].string, systemImage: "paperclip").font(.caption).foregroundStyle(.secondary) }
             }
@@ -242,7 +277,7 @@ struct NativeChatView: View {
                     }
                 }.padding(7).background(Color.linkSurface, in: RoundedRectangle(cornerRadius: 29))
                 HStack {
-                    Button { threadSettings = true } label: { HStack(spacing: 5) { Text(chat.meta["model"].string.isEmpty ? "模型" : chat.meta["model"].string).lineLimit(1); if !chat.meta["effort"].string.isEmpty { Text("· " + chat.meta["effort"].string) }; Image(systemName: "chevron.down").font(.system(size: 8)) } }.disabled(!chat.connected)
+                    Button { threadSettings = true } label: { HStack(spacing: 5) { Text(chat.meta["model"].string.isEmpty ? "模型" : chat.meta["model"].string).lineLimit(1); if !chat.meta["effort"].string.isEmpty { Text("· " + chat.meta["effort"].string) }; Image(systemName: "chevron.down").font(.system(size: 8)) } }.disabled(!chat.connected).accessibilityIdentifier("native.thread.settings")
                     Spacer()
                     Menu {
                         Picker("工作模式", selection: $chat.draft.workMode) { Text("普通").tag("default"); Text("计划").tag("plan") }
@@ -289,24 +324,47 @@ struct NativeChatView: View {
     }
     private func perform(_ action: @escaping () async throws -> Void) { Task { do { try await action() } catch { actionError = error.localizedDescription } } }
 }
-private struct BottomPosition: PreferenceKey { static var defaultValue: CGFloat = 0; static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() } }
+private struct BottomPosition: PreferenceKey { static var defaultValue: CGFloat? = nil; static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) { value = nextValue() ?? value } }
+
+struct NativeModelEfforts {
+    let values: [String]
+    let preferred: String
+    init(catalog: JSONValue, model: String) {
+        let row = catalog["models"].array.first { $0["id"].string == model } ?? .null
+        let supported = row["efforts"].array.map(\.string).filter { !$0.isEmpty }
+        values = supported.isEmpty ? ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"] : supported
+        let defaultValue = row["defaultEffort"].string
+        preferred = values.contains(defaultValue) ? defaultValue : values.contains("medium") ? "medium" : values[0]
+    }
+    func selection(_ current: String) -> String { values.contains(current) ? current : preferred }
+}
 
 struct NativeThreadSettings: View {
     @ObservedObject var chat: ChatModel
     @Environment(\.dismiss) private var dismiss
     @State private var catalog: JSONValue = .null
     @State private var model = ""
-    @State private var effort = ""
+    @State private var effort = "medium"
     @State private var fast = false
     @State private var busy = false
+    @State private var loading = true
     @State private var error = ""
+    private var efforts: NativeModelEfforts { NativeModelEfforts(catalog: catalog, model: model) }
     var body: some View {
         NavigationStack {
             Form {
                 Section("当前会话") {
                     TextField("模型 ID", text: $model).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    if !catalog["models"].array.isEmpty { Picker("可用模型", selection: $model) { ForEach(Array(catalog["models"].array.enumerated()), id: \.offset) { _, row in Text(row["name"].string.isEmpty ? row["id"].string : row["name"].string).tag(row["id"].string) } } }
-                    TextField("推理强度", text: $effort).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    if !catalog["models"].array.isEmpty {
+                        Picker("可用模型", selection: $model) {
+                            if !catalog["models"].array.contains(where: { $0["id"].string == model }) { Text(model.isEmpty ? "选择模型" : model).tag(model) }
+                            ForEach(Array(catalog["models"].array.enumerated()), id: \.offset) { _, row in Text(row["name"].string.isEmpty ? row["id"].string : row["name"].string).tag(row["id"].string) }
+                        }.pickerStyle(.menu).accessibilityIdentifier("native.thread.model")
+                    }
+                    Picker("推理强度", selection: $effort) {
+                        ForEach(efforts.values, id: \.self) { Text($0).tag($0) }
+                    }.pickerStyle(.menu).disabled(loading).accessibilityIdentifier("native.thread.effort")
+                    if loading { ProgressView("正在读取模型选项…") }
                     if catalog["fastMode"]["allowed"].bool { Toggle("Fast 模式", isOn: $fast) }
                 }
                 if !catalog["skills"].array.isEmpty {
@@ -319,11 +377,14 @@ struct NativeThreadSettings: View {
                 NativeNotice(text: error, isError: true)
             }
             .navigationTitle("模型与推理").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() }.disabled(busy) }; ToolbarItem(placement: .confirmationAction) { Button("保存") { Task { await save() } }.disabled(busy || model.isEmpty || !chat.connected) } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() }.disabled(busy) }; ToolbarItem(placement: .confirmationAction) { Button("保存") { Task { await save() } }.disabled(busy || loading || model.isEmpty || !chat.connected) } }
             .task {
                 model = chat.meta["model"].string; effort = chat.meta["effort"].string; fast = chat.meta["serviceTier"].string == "fast"
                 do { if let row = chat.session { catalog = try await chat.api.value("/api/sessions/\(row.id)/catalog", query: ["host": row.host]) } } catch { self.error = error.localizedDescription }
-            }.interactiveDismissDisabled(busy)
+                effort = efforts.selection(effort); loading = false
+            }
+            .onChange(of: model) { _ in if !loading { effort = efforts.selection(effort) } }
+            .interactiveDismissDisabled(busy)
         }
     }
     private func save() async {

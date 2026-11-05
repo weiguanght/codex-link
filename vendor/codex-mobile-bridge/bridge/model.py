@@ -111,7 +111,7 @@ def normalize_item(item):
     elif kind == "reasoning":
         row.update(role="activity", title="思考摘要", text="\n".join(item.get("summary", [])))
     elif kind == "commandExecution":
-        row.update(role="activity", title="执行命令", text=item.get("command", ""), output=item.get("aggregatedOutput", ""), exitCode=item.get("exitCode"))
+        row.update(role="activity", title="执行命令", text=item.get("command", ""), output=item.get("aggregatedOutput", ""), exitCode=item.get("exitCode"), durationMs=item.get("durationMs"))
     elif kind == "fileChange":
         row.update(role="activity", title="文件变更", text="\n\n".join(str(c.get("path", "")) + "\n" + str(c.get("diff", "")) for c in item.get("changes", [])))
     elif kind in ("mcpToolCall", "dynamicToolCall"):

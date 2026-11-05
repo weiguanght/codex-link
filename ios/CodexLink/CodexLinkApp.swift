@@ -34,7 +34,7 @@ struct ContentView: View {
     init(connection: Connection) {
         self.connection = connection; api = connection.api
         _workspace = StateObject(wrappedValue: WorkspaceModel(api: connection.api))
-        _chat = StateObject(wrappedValue: ChatModel(api: connection.api))
+        _chat = StateObject(wrappedValue: ChatModel(api: connection.api, draftScope: connection.peer.map { $0.serverId + "|" + $0.deviceId }))
     }
     var body: some View {
         layout
@@ -44,7 +44,11 @@ struct ContentView: View {
                 do { try await Task.sleep(nanoseconds: 250_000_000); if !Task.isCancelled { await workspace.load() } } catch {}
             }
             .task(id: chatTaskID) { if phase == .active { await chat.run(workspace.selected) } }
-            .onChange(of: connection.peer?.deviceId) { value in if value == nil { workspace.clear(); chat.clear() } }
+            .onChange(of: connection.peer?.deviceId) { value in
+                if value == nil { workspace.clear(); chat.forgetDrafts() }
+                else { chat.setDraftScope(connection.peer.map { $0.serverId + "|" + $0.deviceId }) }
+            }
+            .onChange(of: phase) { if $0 != .active { chat.flushDraft() } }
             .sheet(isPresented: $sidebar) { librarySheet.presentationDragIndicator(.visible) }
             .sheet(isPresented: $newChat) { NativeNewChat(model: workspace, initialPrompt: initialPrompt) { row in chat.primeDraft(initialPrompt, for: row); select(row); initialPrompt = "" } }
             .sheet(isPresented: $settings) { NavigationStack { NativeAppSettings(connection: connection, workspace: workspace) } }
