@@ -52,6 +52,7 @@ struct LinkSession: Decodable, Identifiable, Hashable {
     let projectKey: String?
     let projectName: String?
     let readOnly: Bool?
+    let originator: String?
     let historyReadable: Bool?
     var pinned: Bool?
     var hidden: Bool?

@@ -39,6 +39,14 @@ def handle(handler, write, path):
         else:
             key = (metadata or history or thread)[1]
             host = value('host', 'local')
+            if thread and thread[2] == 'convert':
+                if not write:
+                    handler.close_connection = True
+                    handler.output(405, {'error': '会话转换需要已认证的写请求'})
+                    return True
+                result = library.convert_cli_to_desktop(key, host)
+                handler.output(200, public(result))
+                return True
             row = library.metadata(key, host)
             if metadata:
                 if write:

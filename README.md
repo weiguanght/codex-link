@@ -166,8 +166,9 @@ python3 run-mac.py
 
 | 文件 | 用途 |
 | --- | --- |
-| `codex-link-0.1.0-TrollStore.ipa` | 带 ad-hoc 签名及专属 Keychain 组，供已有 TrollStore 环境测试 |
-| `codex-link-0.1.0-unsigned.ipa` | 未签名产物，需按自己的安装方式处理签名 |
+| `codex-link-<版本>-TrollStore.ipa` | 带 ad-hoc 签名及专属 Keychain 组，供已有 TrollStore 环境测试 |
+| `codex-link-<版本>-unsigned.ipa` | 未签名产物，需按自己的安装方式处理签名 |
+| `SHA256SUMS.txt` | 上述两个 IPA 的 SHA-256 校验值 |
 
 如果目录中没有 IPA，请先按下文的构建步骤生成。`build/` 默认不纳入版本控制，本文不假设已有在线发布下载地址。
 
@@ -315,7 +316,7 @@ codex-link/
 ./scripts/build-ios.sh
 ```
 
-脚本生成图标和 Xcode 工程，编译 arm64 Release，并输出未签名与 TrollStore 两种 IPA。无需 CocoaPods、npm 或 xcodegen。
+脚本从 `Info.plist` 读取版本，生成图标和 Xcode 工程，编译 arm64 Release，并输出未签名与 TrollStore 两种 IPA。脚本检查归档完整性和 TrollStore ad-hoc 签名，成功后原子更新 IPA 与 `SHA256SUMS.txt`。无需 CocoaPods、npm 或 xcodegen。
 
 也可以打开 `ios/codex-link.xcodeproj`。采用普通 Apple 签名时，请配置自己的开发者 Team 和适用的 Bundle ID／签名设置，**不要把 `TrollStore.entitlements` 中的合成身份当作真实开发者身份使用**。
 

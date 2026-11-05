@@ -275,6 +275,7 @@ struct NativeWorkspaceDocument: View {
     @State private var error = ""
     @State private var status = ""
     @State private var pending = ""
+    @State private var externalFile: ShareFile?
     init(document: WorkspaceDocument, api: NativeAPI, session: LinkSession, canEdit: Bool, canComment: Bool, onInsert: @escaping (String) -> Void) {
         self.document = document; self.api = api; self.session = session; self.canEdit = canEdit; self.canComment = canComment; self.onInsert = onInsert
         _draft = State(initialValue: document.text); _baseline = State(initialValue: document.text); _revision = State(initialValue: document.revision)
@@ -295,11 +296,16 @@ struct NativeWorkspaceDocument: View {
             }.padding(.horizontal, 16).padding(.top, 12)
             if document.isDiff { ScrollView { NativeDiff(content: document.text, wrapsLines: wrapsLines).padding(16) } }
             else {
-                Picker("文件视图", selection: $previewMode) { Text("源码").tag("source"); Text("渲染").tag("rendered") }
-                    .pickerStyle(.segmented).padding(.horizontal, 16)
-                if previewMode == "rendered" && NativeCodeLanguages.name(document.path) == "markdown" {
-                    ScrollView { NativeMarkdown(text: draft).padding(16) }
-                } else { NativeCodeView(text: $draft, language: document.path, editable: editing && !busy, wrapsLines: wrapsLines, identifier: "native.workspace.editor") }
+                if NativeCodeLanguages.name(document.path) == "markdown" {
+                    Picker("文件视图", selection: $previewMode) { Text("源码").tag("source"); Text("渲染").tag("rendered") }
+                        .pickerStyle(.segmented).padding(.horizontal, 16)
+                }
+                if NativeCodeLanguages.name(document.path) == "markdown" && previewMode == "rendered" {
+                    ScrollView { NativeChatMarkdown(text: draft).padding(16) }
+                } else {
+                    NativeCodeView(text: $draft, language: document.path, editable: editing && !busy, wrapsLines: wrapsLines, identifier: "native.workspace.editor")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
         }
         .navigationTitle(document.isDiff ? "文件差异" : editing ? "编辑文件" : "文件预览").navigationBarTitleDisplayMode(.inline)
@@ -307,6 +313,10 @@ struct NativeWorkspaceDocument: View {
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("返回") { leave("back") }.disabled(busy) }
             ToolbarItemGroup(placement: .primaryAction) {
+                if !document.isDiff && document.notice.isEmpty {
+                    Button("外部打开", systemImage: "arrow.up.forward.square") { openExternally() }
+                        .accessibilityIdentifier("native.workspace.openExternal")
+                }
                 if canEdit && document.editable && !document.isDiff {
                     if editing { Button("保存") { Task { await save() } }.disabled(busy || !dirty).accessibilityIdentifier("native.workspace.save") }
                     else { Button("编辑") { editing = true }.accessibilityIdentifier("native.workspace.edit") }
@@ -325,8 +335,19 @@ struct NativeWorkspaceDocument: View {
         }
         .interactiveDismissDisabled(dirty || busy)
         .sheet(isPresented: $comment) { NativeDiffComment(path: document.path, onInsert: onInsert) }
+        .sheet(item: $externalFile) { ShareView(file: $0.url) }
     }
     private func leave(_ action: String) { if dirty { pending = action } else { proceed(action) } }
+    private func openExternally() {
+        do {
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let name = URL(fileURLWithPath: document.path).lastPathComponent
+            let file = folder.appendingPathComponent(name.isEmpty ? "document.txt" : name)
+            try Data(draft.utf8).write(to: file, options: .atomic)
+            externalFile = ShareFile(url: file)
+        } catch { self.error = error.localizedDescription }
+    }
     private func proceed(_ action: String) {
         if action == "insert" { onInsert(document.path) }
         else if action == "reload" { Task { await reload() } }

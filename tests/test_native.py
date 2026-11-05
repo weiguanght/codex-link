@@ -72,6 +72,18 @@ class NativeHTTPTests(unittest.TestCase):
         self.assertEqual(code, 200); self.assertTrue(value['capabilities']['readOnly']); self.assertEqual(len(self.calls), 1)
         self.assertEqual(self.server.bridge.activated, [])
 
+    def test_cli_session_converts_on_authenticated_request_and_refreshes_as_writable(self):
+        path = '/api/sessions/' + history.uid(1)
+        self.assertEqual(self.request(path + '/convert', {}, {'Origin': self.base})[0], 401)
+        headers = self.authenticate()
+        code, converted, _ = self.request(path + '/convert', {}, headers)
+        self.assertEqual(code, 200)
+        self.assertFalse(converted['readOnly'])
+        code, timeline, _ = self.request('/api/native/v1/threads/' + history.uid(1) + '/timeline', headers=headers)
+        self.assertEqual(code, 200)
+        self.assertTrue(timeline['capabilities']['send'])
+        self.assertEqual(self.calls[-1][0], history.uid(1))
+
     def test_no_mutation_passthrough_and_bad_inputs(self):
         headers = self.authenticate(); path = '/api/native/v1/threads/' + history.uid(1)
         self.assertEqual(self.request(path+'/send', {'text': 'NO'}, headers)[0], 405)

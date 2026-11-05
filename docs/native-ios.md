@@ -32,7 +32,7 @@ codex-link iOS 使用 SwiftUI 原生界面，通过证书固定的 HTTPS 客户�
 
 ## 保留边界
 
-- 非桌面来源和显式日志视图为只读，不恢复桌面执行 owner。
+- CLI 来源会话先以只读历史显示；本机 `codex-tui` 会话在后台验证并转换成功后刷新为可交互会话，仍使用桌面端原有执行 owner。显式日志视图及不支持转换的来源保持只读。
 - 命令、文件和权限审批及用户输入可在手机处理；computer-use、部分 MCP／结构化请求与计划批准仍由 Mac 处理。
 - 未发送草稿按配对身份、主机和会话保存在本机；恢复时不自动发送，附件需重新选择。文字消息未确认时保留 payload 与请求 ID，供核对后重试。详见 [复刻工程与行为证据](reverse-reconstruction.md)。
 - Markdown 覆盖常用标题、列表、行内格式、链接和代码区块；表格与数学公式不在当前排版范围。
@@ -44,6 +44,6 @@ Runestone 与 TreeSitterLanguages 按固定版本源码随工程集成：Runesto
 
 运行 `bash scripts/test-ios-smoke.sh` 做隔离 IPv4／IPv6 网络、Keychain 与原生 API 冒烟。运行 `LINK_UI_TEST=1 bash scripts/test-ios-smoke.sh` 额外验证工具、代码、文件编辑／保存、历史滚动和工作区流程。fixture 使用临时 HOME、TLS 服务与合成会话，不读取实际 `~/.codex`。
 
-IPA 构建使用 `bash scripts/build-ios.sh`。原生 UI 必须覆盖安装新 IPA；Bundle ID、Keychain service/account 和配对凭据标识不变，不需重新配对。
+IPA 构建使用 `bash scripts/build-ios.sh`。脚本按 `Info.plist` 版本生成未签名与 TrollStore 包，验证归档和 ad-hoc 签名，并写出 `build/SHA256SUMS.txt`。原生 UI 必须覆盖安装新 IPA；Bundle ID、Keychain service/account 和配对凭据标识不变，不需重新配对。
 
 文件链接与强度菜单的修复仅涉及 iOS 客户端，使用现有文件下载与会话设置接口，不需要为这两处修复更新 Mac 网关。

@@ -22,7 +22,7 @@ struct NativeSmokeScreen: View {
     @State private var initialPrompt = ""
     var body: some View {
         NavigationStack {
-            NativeChatView(chat: smoke.chat, workspace: smoke.workspace, onSidebar: { sidebar = true }, onNewChat: { prompt in initialPrompt = prompt; create = true }, onSettings: { settings = true })
+            NativeChatView(chat: smoke.chat, workspace: smoke.workspace, onSidebar: { sidebar = true }, onHome: { smoke.workspace.selected = nil; smoke.workspace.selectProject(nil) }, onNewChat: { prompt in initialPrompt = prompt; create = true }, onSettings: { settings = true })
                 .overlay(alignment: .top) { if smoke.result.hasPrefix("FAIL") { Text(smoke.result).font(.caption).foregroundStyle(.red).padding().background(.regularMaterial) } }
                 .sheet(isPresented: $sidebar) { NavigationStack { NativeLibraryView(model: smoke.workspace, onSelect: { smoke.workspace.selected = $0; sidebar = false }, onNewChat: { sidebar = false; DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { create = true } }, onSettings: { sidebar = false; DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { settings = true } }) } }
                 .sheet(isPresented: $create) { NativeNewChat(model: smoke.workspace, initialPrompt: initialPrompt) { row in smoke.chat.primeDraft(initialPrompt, for: row); smoke.workspace.selected = row; initialPrompt = "" } }

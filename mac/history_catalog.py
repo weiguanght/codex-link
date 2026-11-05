@@ -262,6 +262,63 @@ class HistoryCatalog:
                 raise KeyError('找不到会话')
             return copy.deepcopy(self.rows[key])
 
+    def convert_cli_to_desktop(self, key):
+        key = identifier(key)
+        if not key:
+            raise KeyError('会话 ID 无效')
+        with self.lock:
+            row = self.get(key)
+            if row.get('host') != 'local' or not row.get('_database'):
+                raise PermissionError('仅支持转换本机数据库中的 CLI 会话')
+            if internal(row) or row.get('archived'):
+                raise PermissionError('内部或已归档会话不能转换')
+            if row.get('originator') in DESKTOP:
+                return row
+            if row.get('originator') != 'codex-tui' or row.get('source') != 'cli':
+                raise PermissionError('仅支持 codex-tui 来源的 CLI 会话')
+
+            path = safe_log(self.home, row.get('rollout_path'))
+            try:
+                with path.open('rb') as stream:
+                    header = json.loads(stream.readline(META_LIMIT + 1))
+                meta = header.get('payload', {}) if header.get('type') == 'session_meta' else {}
+                if identifier(meta.get('id')) != key or meta.get('originator') != 'codex-tui':
+                    raise HistoryUnavailable('日志身份或来源与 CLI 会话不一致，已拒绝转换')
+            except (OSError, ValueError, TypeError, AttributeError, RecursionError) as exc:
+                raise HistoryUnavailable('无法验证 CLI 会话日志，已拒绝转换') from exc
+
+            databases = sorted(self.home.glob('state_*.sqlite'), key=lambda item: item.stat().st_mtime, reverse=True)
+            if not databases:
+                raise HistoryUnavailable('找不到 Codex 会话数据库')
+            try:
+                with sqlite3.connect(databases[0], timeout=3) as connection:
+                    connection.execute('BEGIN IMMEDIATE')
+                    current = connection.execute(
+                        'SELECT originator, source, thread_source, rollout_path FROM threads WHERE id = ?', (key,)
+                    ).fetchone()
+                    if not current:
+                        raise KeyError('找不到会话')
+                    originator, source, thread_source, rollout_path = current
+                    if originator in DESKTOP:
+                        connection.commit()
+                    elif (originator != 'codex-tui' or source != 'cli' or thread_source == 'subagent'
+                          or Path(rollout_path).resolve() != path):
+                        raise PermissionError('CLI 会话来源或日志路径已变化，已拒绝转换')
+                    else:
+                        connection.execute(
+                            "UPDATE threads SET originator = 'Codex Desktop' WHERE id = ? AND originator = 'codex-tui'",
+                            (key,)
+                        )
+                        if connection.total_changes != 1:
+                            raise HistoryUnavailable('会话状态已变化，请重新打开后重试')
+                        connection.commit()
+            except (OSError, sqlite3.Error) as exc:
+                raise HistoryUnavailable('Codex 会话数据库正忙或无法更新，请稍后重试') from exc
+
+            self.expires = 0
+            self.snapshot(force=True)
+            return self.get(key)
+
 
 def public(row):
     fields = ('id', 'title', 'cwd', 'archived', 'internal', 'originator', 'model', 'recency',
@@ -286,6 +343,12 @@ class ReadingLibrary:
         row = remote.store.get(key)  # Remote scope deliberately remains upstream.
         row.update(desktopEligible=True, readOnly=False, discoveredBy='remote-desktop')
         row = self.bridge.hosts.decorate([row], host, host)[0]
+        return self.workspace.decorate([row])[0] if self.workspace else row
+
+    def convert_cli_to_desktop(self, key, host='local'):
+        if host != 'local':
+            raise PermissionError('远程 CLI 会话转换尚未支持')
+        row = self.catalog.convert_cli_to_desktop(key)
         return self.workspace.decorate([row])[0] if self.workspace else row
 
     def list(self, query='', limit=100, offset=0, archived=False, scope='all', include_internal=False, project=None, force=False, hidden=False, sort='updated'):

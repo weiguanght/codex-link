@@ -153,6 +153,21 @@ class CatalogTests(unittest.TestCase):
         self.assertFalse(rows[0]['desktopEligible'])
         self.assertIn(rows[0]['rollout_path'], (str(original), str(archive)))
 
+    def test_cli_conversion_updates_only_verified_local_database_originator(self):
+        db = database(self.home, [{'number': 1}])
+        path = log(self.home, 1, message('user', 'preserved CLI history'))
+        original_log = path.read_bytes()
+        library = ReadingLibrary(SpyBridge(self.home))
+        result = library.convert_cli_to_desktop(uid(1))
+        self.assertFalse(result['readOnly'])
+        self.assertEqual(result['originator'], 'Codex Desktop')
+        self.assertEqual(path.read_bytes(), original_log)
+        with sqlite3.connect(db) as connection:
+            self.assertEqual(connection.execute('SELECT originator FROM threads WHERE id = ?', (uid(1),)).fetchone()[0], 'Codex Desktop')
+        self.assertEqual(library.convert_cli_to_desktop(uid(1))['originator'], 'Codex Desktop')
+        with self.assertRaises(KeyError):
+            library.convert_cli_to_desktop(uid(2))
+
     def test_wrong_log_id_is_unreadable_until_matching_fallback_exists(self):
         wrong = log(self.home, 2)
         database(self.home, [{'number': 1, 'rollout_path': str(wrong)}])

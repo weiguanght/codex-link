@@ -76,6 +76,8 @@ final class ChatModel: ObservableObject {
     @Published var error = ""
     @Published var notice = ""
     @Published var pollingError = ""
+    @Published var convertingCLI = false
+    @Published var conversionError = ""
     @Published var hasMore = false
     @Published var draft = ChatDraft() { didSet { scheduleDraftSave() } }
     @Published private(set) var draftStorageError = ""
@@ -85,6 +87,7 @@ final class ChatModel: ObservableObject {
     private var epoch = ""
     private var sequence = -1
     private var before: String?
+    private var loadedLogView: Bool?
     private var generation = 0
     private var details: [String: (version: JSONValue, text: String, next: Int?)] = [:]
     private var responded = Set<String>()
@@ -164,16 +167,33 @@ final class ChatModel: ObservableObject {
 
     func run(_ target: LinkSession?) async {
         flushDraft()
+        let canResumeTimeline = target != nil && session?.identity == target?.identity && loadedLogView == logView && sequence >= 0
         generation += 1; let token = generation
-        session = target; rows = []; files = []; details = [:]; meta = .null; capabilities = .null; epoch = ""; sequence = -1; before = nil; error = ""; pollingError = ""; notice = ""; responded = []; loadingOlder = false
-        isRestoringDraft = true
-        draft = target.map { restoredDraft(for: $0.identity) } ?? ChatDraft()
-        isRestoringDraft = false
+        session = target
+        error = ""; pollingError = ""
+        if !canResumeTimeline {
+            rows = []; files = []; details = [:]; meta = .null; capabilities = .null; epoch = ""; sequence = -1; before = nil; notice = ""; responded = []; loadingOlder = false
+            loadedLogView = nil
+            isRestoringDraft = true
+            draft = target.map { restoredDraft(for: $0.identity) } ?? ChatDraft()
+            isRestoringDraft = false
+        }
         guard target != nil else { loading = false; return }
-        loading = true
-        do { let page: TimelinePage = try await api.request(path("timeline"), query: params()); guard token == generation, !Task.isCancelled else { return }; apply(page, replace: true); await sendPrimedDraftIfReady() }
-        catch { if !Task.isCancelled && token == generation { self.pollingError = error.localizedDescription } }
-        if token == generation { loading = false }
+        if canResumeTimeline {
+            loading = false
+        } else {
+            loading = true
+            do {
+                let page: TimelinePage = try await api.request(path("timeline"), query: params())
+                guard token == generation, !Task.isCancelled else { return }
+                apply(page, replace: true); loadedLogView = logView
+                await sendPrimedDraftIfReady()
+                if let target, target.readOnly == true, target.host == "local", target.originator == "codex-tui" {
+                    Task { await convertCLIIfNeeded(target) }
+                }
+            } catch { if !Task.isCancelled && token == generation { self.pollingError = error.localizedDescription } }
+            if token == generation { loading = false }
+        }
         while !Task.isCancelled && token == generation {
             do {
                 try await Task.sleep(nanoseconds: pollingError.isEmpty ? 1_200_000_000 : 3_000_000_000)
@@ -183,6 +203,29 @@ final class ChatModel: ObservableObject {
                 pollingError = ""; apply(page, replace: page.reset == true || sequence < 0); await sendPrimedDraftIfReady()
             } catch is CancellationError { return }
             catch { if !Task.isCancelled && token == generation { self.pollingError = error.localizedDescription } }
+        }
+    }
+
+    func retryCLIConversion() async {
+        guard let target = session else { return }
+        await convertCLIIfNeeded(target)
+    }
+
+    private func convertCLIIfNeeded(_ target: LinkSession) async {
+        guard session?.identity == target.identity, target.originator == "codex-tui", !convertingCLI else { return }
+        convertingCLI = true; conversionError = ""
+        defer { convertingCLI = false }
+        do {
+            let updated: LinkSession = try await api.request(
+                "/api/sessions/\(target.id)/convert", query: ["host": target.host], body: json([:])
+            )
+            guard session?.identity == target.identity else { return }
+            guard updated.readOnly != true else { throw LinkError.message("转换未能启用会话控制") }
+            sequence = -1
+            session = updated
+            Task { await run(updated) }
+        } catch {
+            if session?.identity == target.identity { conversionError = error.localizedDescription }
         }
     }
     private func apply(_ page: TimelinePage, replace: Bool, older: Bool = false) {
@@ -281,5 +324,5 @@ final class ChatModel: ObservableObject {
         flushDraft()
         return true
     }
-    func clear() { flushDraft(); draftSaveTask?.cancel(); draftSaveTask = nil; generation += 1; sending = []; autoSend = []; drafts = [:]; session = nil; draft = ChatDraft(); rows = []; meta = .null; files = []; logView = false }
+    func clear() { flushDraft(); draftSaveTask?.cancel(); draftSaveTask = nil; generation += 1; sending = []; autoSend = []; drafts = [:]; session = nil; draft = ChatDraft(); rows = []; meta = .null; files = []; loadedLogView = nil; logView = false }
 }

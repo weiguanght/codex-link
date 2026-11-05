@@ -48,7 +48,21 @@ final class NativeFlows: XCTestCase {
         let retained = app.staticTexts.matching(NSPredicate(format: "label == %@", historyLabel)).firstMatch
         XCTAssertTrue(retained.isHittable)
         XCTAssertEqual(retained.frame.minY, historyY, accuracy: 12, "Incoming content interrupted history reading")
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == %@", historyLabel)).firstMatch.waitForExistence(timeout: 10))
+        let resumedHistory = app.staticTexts.matching(NSPredicate(format: "label == %@", historyLabel)).firstMatch
+        XCTAssertTrue(resumedHistory.isHittable)
+        XCTAssertEqual(resumedHistory.frame.minY, historyY, accuracy: 12, "Foreground refresh reset the transcript position")
         capture("History position retained across polls and incoming content")
+        let edgeStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.5))
+        let edgeEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.5))
+        edgeStart.press(forDuration: 0.05, thenDragTo: edgeEnd)
+        XCTAssertTrue(app.buttons["native.home.create"].waitForExistence(timeout: 5), "Left-edge swipe did not return to the task home")
+        let selectedSession = app.buttons["native.home.session.00000000-0000-0000-0000-000000000002"]
+        XCTAssertTrue(selectedSession.waitForExistence(timeout: 8))
+        selectedSession.tap()
+        XCTAssertTrue(app.staticTexts["History reading baseline"].waitForExistence(timeout: 8))
         app.buttons["回到最新消息"].tap()
         XCTAssertTrue(app.staticTexts["Synthetic background update complete"].waitForExistence(timeout: 8))
 
@@ -79,11 +93,11 @@ final class NativeFlows: XCTestCase {
         search.tap(); search.typeText("example.swift")
         let file = app.buttons["native.workspace.entry.Sources/example.swift"]
         XCTAssertTrue(file.waitForExistence(timeout: 8)); file.tap()
-        let preview = app.otherElements["native.workspace.editor"]
+        let preview = app.descendants(matching: .any).matching(identifier: "native.workspace.editor").firstMatch
         XCTAssertTrue(preview.waitForExistence(timeout: 8), app.debugDescription)
         XCTAssertTrue((preview.value as? String)?.contains("workspaceValue = \"working\"") == true)
         app.buttons["native.workspace.edit"].tap()
-        let codeEditor = app.otherElements["native.workspace.editor"]
+        let codeEditor = app.descendants(matching: .any).matching(identifier: "native.workspace.editor").firstMatch
         XCTAssertTrue(codeEditor.waitForExistence(timeout: 8))
         XCTAssertTrue((codeEditor.value as? String)?.contains("workspaceValue") == true)
         codeEditor.tap(); codeEditor.typeText("\n// Native editor save")

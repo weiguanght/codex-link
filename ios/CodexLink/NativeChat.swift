@@ -5,6 +5,7 @@ struct NativeChatView: View {
     @ObservedObject var chat: ChatModel
     @ObservedObject var workspace: WorkspaceModel
     let onSidebar: () -> Void
+    let onHome: () -> Void
     let onNewChat: (String) -> Void
     let onSettings: () -> Void
     var showSidebar = true
@@ -43,6 +44,13 @@ struct NativeChatView: View {
             if chat.session == nil { home }
             else { conversation }
         }
+        .simultaneousGesture(DragGesture(minimumDistance: 25).onEnded { value in
+            guard showSidebar, chat.session != nil,
+                  value.startLocation.x <= 24,
+                  value.translation.width >= 90,
+                  abs(value.translation.height) < 70 else { return }
+            onHome()
+        })
         .background(Color.linkCanvas)
         .toolbar { navigationControls }
         .sheet(isPresented: $threadSettings) { NativeThreadSettings(chat: chat) }
@@ -256,7 +264,17 @@ struct NativeChatView: View {
     private var composer: some View {
         VStack(spacing: 9) {
             if chat.readOnly {
-                HStack(spacing: 10) { Image(systemName: "doc.text"); Text("只读历史").font(.subheadline); Spacer(); if chat.logView && chat.session?.readOnly != true { Button("返回交互视图") { chat.logView = false } } }.foregroundStyle(.secondary).padding(18)
+                VStack(spacing: 4) {
+                    HStack(spacing: 10) {
+                        if chat.convertingCLI { ProgressView().controlSize(.small); Text("正在接管 CLI 会话…").font(.subheadline) }
+                        else { Image(systemName: "doc.text"); Text("只读历史").font(.subheadline) }
+                        Spacer()
+                        if chat.logView && chat.session?.readOnly != true { Button("返回交互视图") { chat.logView = false } }
+                    }
+                    if !chat.conversionError.isEmpty {
+                        HStack { Text(chat.conversionError).font(.caption).foregroundStyle(.red); Spacer(); Button("重试") { Task { await chat.retryCLIConversion() } }.font(.caption) }
+                    }
+                }.foregroundStyle(.secondary).padding(18)
             } else {
                 if !chat.connected {
                     HStack { Text(chat.meta["connecting"].bool || chat.meta["activating"].bool ? "正在连接 Mac 会话…" : "会话尚未连接").font(.caption).foregroundStyle(.secondary); Spacer(); Button("连接会话") { perform { try await chat.reconnect() } }.font(.caption.weight(.medium)) }.padding(.horizontal, 9)
