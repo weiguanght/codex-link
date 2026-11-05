@@ -30,48 +30,113 @@ struct NativeToolPresentation {
     }
     var language: String { kind == "commandExecution" ? "bash" : ["mcpToolCall", "dynamicToolCall"].contains(kind) ? "json" : "text" }
     var icon: String { kind == "commandExecution" ? "terminal" : kind == "fileChange" ? "doc.badge.gearshape" : "wrench.and.screwdriver" }
-    static func preview(_ text: String, lines: Int) -> String { String(text.split(separator: "\n", omittingEmptySubsequences: false).prefix(lines).joined(separator: "\n").prefix(4096)) }
 }
 
+/// Every tool uses the chat's single detail sheet; the transcript never embeds output.
 struct NativeToolRow: View {
     let row: NativeRow
     let text: String
-    let hasMore: Bool
-    let loadMore: () -> Void
-    @State private var expanded = false
+    let open: () -> Void
     private var presentation: NativeToolPresentation { NativeToolPresentation(row: row, text: text) }
-    private var needsExpansion: Bool { hasMore || text.count > 4096 || text.components(separatedBy: "\n").count > 5 }
+    private var summary: String {
+        let input = presentation.input.components(separatedBy: .newlines).filter { !$0.isEmpty }.joined(separator: " ")
+        return row.kind == "fileChange" ? (row.title ?? "文件变更") : input.isEmpty ? (row.title ?? "工具调用") : input
+    }
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Label(row.title ?? row.kind ?? "工具调用", systemImage: presentation.icon).font(.caption.weight(.semibold))
-                Spacer()
-                if !presentation.status.isEmpty { Label(presentation.status, systemImage: presentation.symbol).font(.caption2).foregroundStyle(presentation.failed ? Color.red : Color.secondary) }
-                if let duration = row.durationMs { Text(String(format: "%.1fs", Double(duration) / 1000)).font(.caption2).foregroundStyle(.secondary) }
-            }
-            if row.kind == "fileChange" { NativeDiff(content: expanded ? text : NativeToolPresentation.preview(text, lines: 5), wrapsLines: true) }
-            else if expanded {
-                NativeCodeBlock(text: presentation.input, language: presentation.language)
-            } else {
-                let input = NativeToolPresentation.preview(presentation.input, lines: 5)
-                NativeCodeView(text: .constant(input), language: presentation.language, lineNumbers: false, identifier: "native.tool.input.\(row.key)")
-                    .frame(height: CGFloat(min(5, max(1, input.components(separatedBy: "\n").count))) * 20 + 26)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-            }
-            if !presentation.output.isEmpty {
-                Text("输出").font(.caption2).foregroundStyle(.secondary)
-                NativeTerminalOutput(text: expanded ? presentation.output : NativeToolPresentation.preview(presentation.output, lines: 3))
-            }
-            HStack {
-                if needsExpansion {
-                    Button(expanded ? "收起内容" : "展开完整内容") { expanded.toggle(); if expanded && hasMore { loadMore() } }.font(.caption)
-                }
-                if expanded && hasMore { Button("继续加载输出", action: loadMore).font(.caption) }
-                Spacer()
-                Button { UIPasteboard.general.string = text } label: { Image(systemName: "doc.on.doc") }.accessibilityLabel("复制工具内容")
-            }
-        }.padding(12).background(Color.linkSurface.opacity(0.6), in: RoundedRectangle(cornerRadius: 14))
+        Button(action: open) {
+            HStack(spacing: 8) {
+                Image(systemName: presentation.icon).foregroundStyle(.secondary)
+                NativeSyntaxText(text: summary, language: presentation.language, singleLine: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: presentation.symbol).foregroundStyle(presentation.failed ? Color.red : Color.secondary)
+                    .accessibilityLabel(presentation.status)
+                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+            }.padding(.horizontal, 12).padding(.vertical, 11).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(Color.linkSurface.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
         .accessibilityIdentifier("native.tool.\(row.key)")
+    }
+}
+
+struct NativeToolDetail: View {
+    @ObservedObject var chat: ChatModel
+    let rowKey: String
+    let sessionIdentity: String
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("native.commandLineWrapping") private var commandWrapping = true
+    @AppStorage("native.diffLineWrapping") private var diffWrapping = true
+    @State private var loading = false
+    @State private var error = ""
+    private var row: NativeRow? { chat.session?.identity == sessionIdentity ? chat.rows.first { $0.key == rowKey } : nil }
+    private var wrapsLines: Binding<Bool> { row?.kind == "fileChange" ? $diffWrapping : $commandWrapping }
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                if let row {
+                    let text = chat.rowText(row)
+                    let presentation = NativeToolPresentation(row: row, text: text)
+                    VStack(alignment: .leading, spacing: 18) {
+                        HStack {
+                            Label(presentation.status, systemImage: presentation.symbol).foregroundStyle(presentation.failed ? Color.red : Color.secondary)
+                            Spacer()
+                            if let duration = row.durationMs { Text(String(format: "%.1fs", Double(duration) / 1000)).foregroundStyle(.secondary) }
+                        }.font(.caption)
+                        if row.kind == "fileChange" {
+                            NativeDiff(content: text, wrapsLines: diffWrapping)
+                        } else {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(row.kind == "commandExecution" ? "命令" : "输入").font(.subheadline.weight(.semibold))
+                                NativeSyntaxText(text: presentation.input, language: presentation.language, wrapsLines: commandWrapping)
+                                    .padding(12).background(Color.linkSurface, in: RoundedRectangle(cornerRadius: 12))
+                                    .accessibilityIdentifier("native.tool.detail.input")
+                            }
+                            Divider()
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("输出").font(.subheadline.weight(.semibold))
+                                if !presentation.output.isEmpty {
+                                    NativeTerminalOutput(text: presentation.output, wrapsLines: commandWrapping)
+                                        .accessibilityIdentifier("native.tool.detail.output")
+                                } else if !loading {
+                                    Text(["running", "inProgress", "in_progress"].contains(row.status ?? "") ? "等待输出…" : "无输出").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        if loading { ProgressView("正在加载完整内容…").font(.caption) }
+                        if !error.isEmpty {
+                            NativeNotice(text: error, isError: true)
+                            Button("重试加载") { Task { await loadRemaining() } }.disabled(loading)
+                        }
+                    }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                } else { Text("此工具记录已不可用").foregroundStyle(.secondary).padding() }
+            }
+            .navigationTitle(row?.kind == "fileChange" ? "文件变更" : row?.kind == "commandExecution" ? "执行命令" : "工具详情")
+            .navigationBarTitleDisplayMode(.inline)
+            .accessibilityIdentifier("native.tool.detail")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Menu {
+                        Toggle("自动换行", isOn: wrapsLines)
+                        Button("复制全部", systemImage: "doc.on.doc") { if let row { UIPasteboard.general.string = chat.rowText(row) } }
+                        if let row, row.kind == "commandExecution" {
+                            Button("复制命令", systemImage: "terminal") { UIPasteboard.general.string = NativeToolPresentation(row: row, text: chat.rowText(row)).input }
+                        }
+                    } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("详情选项")
+                }
+                ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } }
+            }
+            .task(id: row?.version) { await loadRemaining() }
+        }
+    }
+    private func loadRemaining() async {
+        loading = true; error = ""
+        defer { loading = false }
+        do {
+            while let current = row, chat.rowHasMore(current) {
+                try Task.checkCancellation()
+                try await chat.expand(current)
+            }
+        } catch is CancellationError {} catch { if !Task.isCancelled { self.error = error.localizedDescription } }
     }
 }
 
@@ -129,9 +194,17 @@ enum NativeTerminalText {
 }
 struct NativeTerminalOutput: View {
     let text: String
+    var wrapsLines = false
     var body: some View {
-        ScrollView(.horizontal) {
-            Text(NativeTerminalText.attributed(text)).font(.system(.caption, design: .monospaced)).textSelection(.enabled).fixedSize(horizontal: true, vertical: false)
+        Group {
+            if wrapsLines {
+                output.fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ScrollView(.horizontal) { output.fixedSize(horizontal: true, vertical: true).frame(maxWidth: .infinity, alignment: .leading) }
+            }
         }
+    }
+    private var output: some View {
+        Text(NativeTerminalText.attributed(text)).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
     }
 }

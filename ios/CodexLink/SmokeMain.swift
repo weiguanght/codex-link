@@ -19,6 +19,7 @@ struct NativeSmokeScreen: View {
     @State private var sidebar = false
     @State private var create = false
     @State private var settings = false
+    @StateObject private var connection = Connection()
     @State private var initialPrompt = ""
     var body: some View {
         NavigationStack {
@@ -26,7 +27,7 @@ struct NativeSmokeScreen: View {
                 .overlay(alignment: .top) { if smoke.result.hasPrefix("FAIL") { Text(smoke.result).font(.caption).foregroundStyle(.red).padding().background(.regularMaterial) } }
                 .sheet(isPresented: $sidebar) { NavigationStack { NativeLibraryView(model: smoke.workspace, onSelect: { smoke.workspace.selected = $0; sidebar = false }, onNewChat: { sidebar = false; DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { create = true } }, onSettings: { sidebar = false; DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { settings = true } }) } }
                 .sheet(isPresented: $create) { NativeNewChat(model: smoke.workspace, initialPrompt: initialPrompt) { row in smoke.chat.primeDraft(initialPrompt, for: row); smoke.workspace.selected = row; initialPrompt = "" } }
-                .sheet(isPresented: $settings) { NavigationStack { NativeCodexSettings(api: smoke.api, workspace: smoke.workspace, initialScope: "") } }
+                .sheet(isPresented: $settings) { NavigationStack { NativeAppSettings(connection: connection, workspace: smoke.workspace) } }
         }
         .task(id: smoke.workspace.filterID) { if smoke.api.ready { await smoke.workspace.load() } }
         .task(id: smoke.workspace.selected?.identity ?? "none") { if smoke.api.ready { await smoke.chat.run(smoke.workspace.selected) } }
@@ -40,6 +41,41 @@ final class NativeSmoke: ObservableObject {
     @Published var result = "Testing…"
     init() { let api = NativeAPI(); self.api = api; workspace = WorkspaceModel(api: api); chat = ChatModel(api: api) }
     func require(_ value: Bool, _ message: String) throws { if !value { throw LinkError.message(message) } }
+    private func verifyToolRendering() throws {
+        let diff = NativeDiffDocument("""
+        Sources/中文 文件.swift
+        @@ -10,2 +20,3 @@ func example
+        -let old = 1
+        +let new = 2
+         let same = 3
+        +let extra = 4
+
+        README.md
+        @@ -1 +1 @@
+        -old
+        +new
+        """)
+        try require(diff.files.count == 2 && diff.files[0].path == "Sources/中文 文件.swift", "Flattened desktop file sections were lost")
+        try require(diff.files[0].additions == 2 && diff.files[0].deletions == 1, "Diff stats are incorrect")
+        try require(diff.files[0].lines[1].old == 10 && diff.files[0].lines[2].new == 20 && diff.files[0].lines[3].old == 11, "Hunk line positions are incorrect")
+        let prefixes = NativeDiffDocument("--- a/test.txt\n+++ b/test.txt\n@@ -1 +1 @@\n---deleted\n+++added")
+        try require(prefixes.files.count == 1 && prefixes.files[0].additions == 1 && prefixes.files[0].deletions == 1, "Code prefixes became file headers")
+        let patch = NativeDiffDocument("*** Begin Patch\n*** Add File: new.py\n+print(1)\n*** Update File: old.py\n*** Move to: renamed.py\n@@\n-old\n+new\n*** End Patch")
+        try require(patch.files.count == 2 && patch.files[0].lines.first?.new == 1 && patch.files[1].path == "renamed.py" && patch.files[1].previousPath == "old.py", "apply_patch file/move parsing failed")
+        let removed = NativeDiffDocument("diff --git a/old.txt b/old.txt\n--- a/old.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-gone")
+        try require(removed.files.first?.path == "old.txt" && removed.files.first?.deletions == 1, "Deleted file was lost")
+        let added = NativeDiffDocument("new.txt\ndiff --git a/new.txt b/new.txt\nnew file mode 100644\n--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1 @@\n+new")
+        try require(added.files.count == 1 && added.files[0].path == "new.txt" && added.files[0].additions == 1, "Git metadata created a phantom file")
+        let large = NativeDiffDocument("large.txt\n@@ -0,0 +1,2100 @@\n" + Array(repeating: "+value", count: 2100).joined(separator: "\n"))
+        try require(large.files.first?.additions == 2100, "Large diffs stopped being structured")
+        let command = "printf '中文👨‍👩‍👧‍👦'\n\nprintf done"
+        let data = try JSONSerialization.data(withJSONObject: ["key": "test", "order": 0, "role": "activity", "kind": "commandExecution", "text": command, "version": "v1", "inputLength": command.unicodeScalars.count])
+        let row = try JSONDecoder().decode(NativeRow.self, from: data)
+        let presentation = NativeToolPresentation(row: row, text: command + "\n\nresult")
+        try require(presentation.input == command && presentation.output == "result", "Unicode/multiline command was split into output")
+        let highlighted = NativeSyntaxHighlight.text("let value = 42", language: "swift")
+        try require(String(highlighted.characters) == "let value = 42" && highlighted.runs.count > 1, "Syntax highlighting lost source or colors")
+    }
     func run() async {
         guard result == "Testing…" else { return }
         let env = ProcessInfo.processInfo.environment
@@ -67,9 +103,14 @@ final class NativeSmoke: ObservableObject {
             }
             try require(workspace.sessions.count >= 2, "Native session decoding failed: " + workspace.error)
             try require(!workspace.projects.isEmpty, "Native project index missing")
+            try verifyToolRendering()
+            checks.append("structured multi-file diff parsing + line counts + Unicode command/output split + syntax highlighting")
             // XCTest uses the same live fixture after the full smoke pass.
             // Bootstrap its UI without rerunning mutations or fixed send-count assertions.
-            if env["LINK_SMOKE_UI"] == "1" { result = "UI ready"; return }
+            if env["LINK_SMOKE_UI"] == "1" {
+                UserDefaults.standard.removeObject(forKey: "native.commandLineWrapping")
+                result = "UI ready"; return
+            }
             checks.append("IPv4 native bootstrap + projects + session list")
             let readOnly = workspace.sessions.first { $0.readOnly == true }!
             let page: TimelinePage = try await api.request("/api/native/v1/threads/\(readOnly.id)/timeline")

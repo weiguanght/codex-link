@@ -174,3 +174,41 @@ struct NativeCodeBlock: View {
         }
     }
 }
+
+/// A selectable, naturally sized code block without an editor gutter or nested sheet.
+/// Parsing stays off the main actor, including for streamed command updates.
+enum NativeSyntaxHighlight {
+    static func text(_ text: String, language: String) -> AttributedString {
+        guard !text.isEmpty, let grammar = NativeCodeLanguages.language(language) else { return AttributedString(text) }
+        let highlighter = Runestone.StringSyntaxHighlighter(theme: NativeCodeTheme(), language: grammar)
+        return (try? AttributedString(highlighter.syntaxHighlight(text), including: \.uiKit)) ?? AttributedString(text)
+    }
+}
+struct NativeSyntaxText: View {
+    let text: String
+    let language: String
+    var wrapsLines = true
+    var singleLine = false
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var highlighted: AttributedString?
+    @State private var appliedText = ""
+    private struct Request: Hashable { let text: String; let language: String; let dark: Bool }
+    var body: some View {
+        Group {
+            if singleLine {
+                code.lineLimit(1).truncationMode(.tail)
+            } else if wrapsLines {
+                code.fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ScrollView(.horizontal) { code.fixedSize(horizontal: true, vertical: true) }
+            }
+        }
+        .task(id: Request(text: text, language: language, dark: colorScheme == .dark)) {
+            let parsed = await Task.detached(priority: .userInitiated) { NativeSyntaxHighlight.text(text, language: language) }.value
+            if !Task.isCancelled { appliedText = text; highlighted = parsed }
+        }
+    }
+    private var code: some View {
+        Text(appliedText == text ? highlighted ?? AttributedString(text) : AttributedString(text)).font(.system(size: 14, design: .monospaced)).textSelection(.enabled)
+    }
+}

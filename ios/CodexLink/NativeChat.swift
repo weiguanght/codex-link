@@ -16,6 +16,7 @@ struct NativeChatView: View {
     @State private var actionError = ""
     @State private var share: ShareFile?
     @State private var messageAction: NativeRow?
+    @State private var toolDetail: NativeRow?
     @State private var workspaceSession: LinkSession?
     @State private var following = true
     @State private var draggingHistory = false
@@ -56,6 +57,7 @@ struct NativeChatView: View {
         .sheet(isPresented: $threadSettings) { NativeThreadSettings(chat: chat) }
         .sheet(isPresented: $status) { threadStatus }
         .sheet(item: $share) { ShareView(file: $0.url) }
+        .sheet(item: $toolDetail) { row in NativeToolDetail(chat: chat, rowKey: row.key, sessionIdentity: chat.session?.identity ?? "") }
         .sheet(item: $messageAction) { NativeMessageAction(chat: chat, row: $0, workspace: workspace) }
         .sheet(item: $workspaceSession) { session in
             NativeWorkspaceBrowser(api: chat.api, session: session, canEdit: chat.capabilities["workspaceWrite"].bool) { text in
@@ -69,7 +71,7 @@ struct NativeChatView: View {
             }
         }
         .alert("操作失败", isPresented: Binding(get: { !actionError.isEmpty }, set: { if !$0 { actionError = "" } })) { Button("好", role: .cancel) {} } message: { Text(actionError) }
-        .onChange(of: chat.session?.identity) { _ in following = true; draggingHistory = false; bottomPosition = nil; focused = false; workspaceSession = nil }
+        .onChange(of: chat.session?.identity) { _ in following = true; draggingHistory = false; bottomPosition = nil; focused = false; workspaceSession = nil; toolDetail = nil }
         .environment(\.openURL, OpenURLAction { url in
             if let file = NativeMessageLinks.file(for: url, files: chat.files) {
                 download(file); return .handled
@@ -181,10 +183,9 @@ struct NativeChatView: View {
                         if chat.loading { ProgressView("正在读取对话…").frame(maxWidth: .infinity).padding(.vertical, 24) }
                         ForEach(blocks) { block in
                             if block.process {
-                                DisclosureGroup {
-                                    VStack(alignment: .leading, spacing: 20) { ForEach(block.rows) { row in processRow(row).id(row.key) } }.padding(.top, 12)
-                                } label: { Label("执行过程 · \(block.rows.count) 项", systemImage: "terminal").font(.subheadline).foregroundStyle(.secondary) }
-                                .padding(14).background(Color.linkSurface.opacity(0.65), in: RoundedRectangle(cornerRadius: 18)).id(block.id)
+                                VStack(alignment: .leading, spacing: 6) {
+                                    ForEach(block.rows) { row in processRow(row).id(row.key) }
+                                }.id(block.id)
                             } else { message(block.rows[0]).id(block.id) }
                         }
                         if chat.running { HStack(spacing: 10) { ProgressView().scaleEffect(0.7); Text("Codex 正在执行").font(.caption).foregroundStyle(.secondary) } }
@@ -233,7 +234,7 @@ struct NativeChatView: View {
         }.safeAreaInset(edge: .bottom, spacing: 0) { composer }
     }
     private func processRow(_ row: NativeRow) -> some View {
-        NativeToolRow(row: row, text: chat.rowText(row), hasMore: chat.rowHasMore(row)) { perform { try await chat.expand(row) } }
+        NativeToolRow(row: row, text: chat.rowText(row)) { focused = false; toolDetail = row }
     }
     private func message(_ row: NativeRow) -> some View {
         VStack(alignment: row.role == "user" ? .trailing : .leading, spacing: 10) {

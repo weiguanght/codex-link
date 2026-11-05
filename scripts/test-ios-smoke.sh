@@ -71,8 +71,12 @@ source.write_bytes(plistlib.dumps(data))
 (root / 'build/native-ui-xctestrun.txt').write_text(str(source))
 PY
       UI_RUN="$(cat "$ROOT/build/native-ui-xctestrun.txt")"
+      UI_TEST_ARGS=(-parallel-testing-enabled NO)
+      if [ -n "${LINK_UI_TEST_CASE:-}" ]; then
+        UI_TEST_ARGS+=("-only-testing:$LINK_UI_TEST_CASE")
+      fi
       xcodebuild test-without-building -xctestrun "$UI_RUN" -destination "platform=iOS Simulator,id=$DEVICE" \
-        -parallel-testing-enabled NO -resultBundlePath "$ROOT/build/native-ui-$(date +%Y%m%d-%H%M%S).xcresult" \
+        "${UI_TEST_ARGS[@]}" -resultBundlePath "$ROOT/build/native-ui-$(date +%Y%m%d-%H%M%S).xcresult" \
         > "$ROOT/build/native-ui-test.log" 2>&1
       xcrun simctl io "$DEVICE" screenshot "$ROOT/build/native-ui-final.png" >/dev/null 2>&1 || true
     fi

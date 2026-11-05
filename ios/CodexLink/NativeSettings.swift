@@ -6,6 +6,7 @@ struct NativeAppSettings: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("native.appearance") private var appearance = "system"
     @AppStorage("native.followUpBehavior") private var followUpBehavior = "send"
+    @AppStorage("native.commandLineWrapping") private var commandLineWrapping = true
     @AppStorage("native.diffLineWrapping") private var diffLineWrapping = true
     @State private var forget = false
     var body: some View {
@@ -33,7 +34,8 @@ struct NativeAppSettings: View {
                     Text("完成后发送").tag("queue")
                     Text("补充当前任务").tag("steer")
                 }
-                Toggle("Diff 长行自动换行", isOn: $diffLineWrapping)
+                Toggle("命令与输出自动换行", isOn: $commandLineWrapping).accessibilityIdentifier("native.settings.commandWrapping")
+                Toggle("文件变更自动换行", isOn: $diffLineWrapping)
             } header: { Text("任务与阅读") } footer: {
                 Text("默认方式用于尚无草稿的新会话，当前会话仍可单独选择。输入草稿只保存在此设备；忘记 Mac 时一并清除。")
             }

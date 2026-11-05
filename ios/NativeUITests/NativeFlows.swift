@@ -1,6 +1,77 @@
 import XCTest
 
 final class NativeFlows: XCTestCase {
+    func testToolDetailsAndWrapping() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "local.codex.link")
+        for key in ["PORT", "PIN", "ID"] {
+            let name = "LINK_SMOKE_" + key
+            app.launchEnvironment[name] = ProcessInfo.processInfo.environment[name]
+        }
+        app.launchEnvironment["LINK_SMOKE_UI"] = "1"
+        app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        app.launch()
+        let session = app.buttons["native.home.session.00000000-0000-0000-0000-000000000002"]
+        XCTAssertTrue(session.waitForExistence(timeout: 40)); session.tap()
+        let transcript = app.scrollViews["native.transcript"]
+        let command = app.buttons["native.tool.t1"]
+        XCTAssertTrue(command.waitForExistence(timeout: 10))
+        for _ in 0..<6 { if command.isHittable { break }; transcript.swipeDown() }
+        XCTAssertTrue(command.isHittable)
+        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Synthetic tool output")).firstMatch.exists)
+        capture("Compact command rows without output")
+        command.tap()
+        XCTAssertTrue(app.navigationBars["执行命令"].waitForExistence(timeout: 8))
+        let input = app.staticTexts["native.tool.detail.input"]
+        let output = app.staticTexts["native.tool.detail.output"]
+        XCTAssertTrue(input.waitForExistence(timeout: 8))
+        XCTAssertTrue(input.label.contains("rg --files ios/CodexLink"))
+        XCTAssertTrue(output.waitForExistence(timeout: 8))
+        let complete = NSPredicate(format: "label CONTAINS %@", "Synthetic output final page")
+        expectation(for: complete, evaluatedWith: output)
+        waitForExpectations(timeout: 15)
+        XCTAssertLessThan(input.frame.minY, output.frame.minY, "Full command must appear above its output")
+        capture("Single command detail with paginated output")
+        app.buttons["详情选项"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        app.buttons["自动换行"].tap()
+        capture("Command output with horizontal scrolling")
+        app.buttons["完成"].tap()
+        XCTAssertTrue(command.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Synthetic tool output")).firstMatch.exists)
+
+        app.buttons["native.tool.t2"].tap()
+        XCTAssertTrue(app.navigationBars["执行命令"].waitForExistence(timeout: 5))
+        let secondInput = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "echo second-command")).firstMatch
+        let secondOutput = app.staticTexts["Synthetic second output"]
+        XCTAssertTrue(secondInput.waitForExistence(timeout: 8))
+        XCTAssertTrue(secondOutput.waitForExistence(timeout: 8))
+        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Synthetic tool output")).firstMatch.exists)
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "exit 17")).firstMatch.exists)
+        app.buttons["完成"].tap()
+
+        app.buttons["native.tool.f1"].tap()
+        XCTAssertTrue(app.navigationBars["文件变更"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Sources/example.swift"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["README.md"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "native.diff.line.0.1").firstMatch.exists)
+        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "@@")).firstMatch.exists)
+        capture("Rendered file changes in a standalone sheet")
+        app.buttons["完成"].tap()
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.5)))
+        XCTAssertTrue(app.buttons["native.home.settings"].waitForExistence(timeout: 8))
+        app.buttons["native.home.settings"].tap()
+        let wrapping = app.switches["native.settings.commandWrapping"]
+        XCTAssertTrue(wrapping.waitForExistence(timeout: 8))
+        for _ in 0..<4 { if wrapping.exists && wrapping.frame.maxY < app.frame.maxY - 80 { break }; app.swipeUp() }
+        XCTAssertEqual(wrapping.value as? String, "0", "Detail toggle must share the saved setting")
+        wrapping.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        expectation(for: NSPredicate(format: "value == %@", "1"), evaluatedWith: wrapping)
+        waitForExpectations(timeout: 8)
+        capture("Command wrapping setting")
+        app.buttons["完成"].tap()
+    }
+
     func testNativeWorkspaceAndConversation() throws {
         continueAfterFailure = false
         let app = XCUIApplication(bundleIdentifier: "local.codex.link")
@@ -28,7 +99,7 @@ final class NativeFlows: XCTestCase {
         composer.tap(); composer.typeText("Synthetic gesture send")
         app.buttons["native.send"].tap()
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "消息已提交")).firstMatch.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["代码差异"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "代码差异")).firstMatch.waitForExistence(timeout: 5))
         capture("Native conversation with wrapped diff")
 
         composer.tap(); composer.typeText("Synthetic scroll regression")
@@ -63,15 +134,15 @@ final class NativeFlows: XCTestCase {
         XCTAssertTrue(selectedSession.waitForExistence(timeout: 8))
         selectedSession.tap()
         XCTAssertTrue(app.staticTexts["History reading baseline"].waitForExistence(timeout: 8))
-        app.buttons["回到最新消息"].tap()
+        if app.buttons["回到最新消息"].exists { app.buttons["回到最新消息"].tap() }
         XCTAssertTrue(app.staticTexts["Synthetic background update complete"].waitForExistence(timeout: 8))
 
         app.buttons["native.thread.settings"].tap()
         let effort = app.buttons["native.thread.effort"]
         XCTAssertTrue(effort.waitForExistence(timeout: 8))
-        effort.tap(); app.buttons["low"].tap()
-        app.buttons["native.thread.model"].tap(); app.buttons["Synthetic Restricted"].tap()
-        effort.tap()
+        effort.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)).tap(); app.buttons["low"].tap()
+        app.buttons["native.thread.model"].coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)).tap(); app.buttons["Synthetic Restricted"].tap()
+        effort.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)).tap()
         XCTAssertTrue(app.buttons["minimal"].exists)
         XCTAssertFalse(app.buttons["low"].exists)
         app.buttons["minimal"].tap()
@@ -112,7 +183,7 @@ final class NativeFlows: XCTestCase {
         app.buttons["已暂存"].tap()
         let change = app.buttons["native.workspace.change.Sources/example.swift"]
         XCTAssertTrue(change.waitForExistence(timeout: 8)); change.tap()
-        XCTAssertTrue(app.staticTexts["代码差异"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "代码差异")).firstMatch.waitForExistence(timeout: 8))
         capture("Native staged workspace diff")
         app.buttons["评论此文件"].tap()
         let comment = app.textViews["native.diff.comment"]
@@ -128,6 +199,7 @@ final class NativeFlows: XCTestCase {
 
         app.buttons["native.home.settings"].tap()
         capture("Native settings root")
+        app.buttons["默认行为"].tap()
         let model = app.textFields["native.setting.model"]
         XCTAssertTrue(model.waitForExistence(timeout: 10))
         model.tap(); model.typeText("-draft")
@@ -137,6 +209,7 @@ final class NativeFlows: XCTestCase {
         XCTAssertTrue(model.exists)
         app.buttons["返回"].tap()
         app.buttons["放弃草稿"].tap()
+        XCTAssertTrue(app.buttons["完成"].waitForExistence(timeout: 8)); app.buttons["完成"].tap()
         XCTAssertTrue(app.buttons["native.home.create"].waitForExistence(timeout: 8))
 
         app.buttons["native.sidebar"].tap()

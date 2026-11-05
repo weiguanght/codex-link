@@ -15,6 +15,8 @@
 | 工作区浏览、搜索与编辑 | `CodexRemoteWorkspaceBrowserViewModel` 的目录缓存、搜索和路径回填；访问器 `0x23bfa0c` | `NativeWorkspaceBrowser.swift`、`mac/workspace_reader.py`、`mac/native_http.py` | 新增会话目录浏览、文件名／路径搜索、受修订冲突检查保护的文本预览与编辑 |
 | 工作区差异与评论 | `CodexRemoteWorkspaceDiffSheetViewModel`、`CodexRemoteWorkspaceDiffFile`、`CodexRemoteDiffCommentState`；访问器 `0x23bffe8`、`0x2f2f52c`、`0x23c08fc` | 同上，以及 `NativeDiff.swift`、`NativeModels.swift` | 新增未暂存／已暂存文件差异、未跟踪文件预览和文件评论追加草稿；详见 [工作区说明](workspace-browser.md) |
 
+命令与差异详情进一步采用独立页面：`CommandExecutionShellCard`（访问器 `0x25c1c9c`）保存 `payload` / `displayCommand`；`CodexRemoteTurnDiffSheetContent`（`0x25ce5b4`）保存 `presentation` / `focusedFileID` / `wrapsLines`；`CodexRemoteDiffFileList`（`0x2628eb0`）保存 `files` / `readingState` / `wrapsLines`；`CodexRemoteDiffFileSection`（`0x2645a64`）保存文件路径、增删统计、`documentDiff` 与折叠状态。本项目在 `NativeToolRow.swift` / `NativeDiff.swift` 独立实现对应的命令详情及文件分区渲染。字段来自 `type_fields.json`；对应访问器伪代码分别位于 `pseudocode/CodexRemoteThread.c:911504`、`:929272`、`:1019203`、`:1056936`，访问器本身只有跳转，不能据此声称恢复了原版差异算法。
+
 字段与访问器证据可以确认原程序存在这些状态/接口；本项目的文件格式、配对隔离、默认行为和 UI 是独立实现，未声称与原版逐分支一致。`send/queue/steer` 是既有网关取值，未声称就是原版枚举的原始编码。
 
 完整反编译资料位于工作区相邻的 `Payload/ChatGPT.app/codex-remote-analysis/full/`。`报告.md`、`导航.md` 和 `type_fields.json` 是证据入口。

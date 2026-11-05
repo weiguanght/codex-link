@@ -40,6 +40,15 @@ log(home, 1, message('user', 'Synthetic smoke fixture') + message('assistant', '
 log(home, 2, message('user', '请完善远程会话的原生界面。'), cwd=str(project))
 
 
+TOOL_COMMAND = 'printf "%s\\n" "中文 command with a long argument to verify wrapping and horizontal scrolling on narrow screens"\necho second-command'
+TOOL_PATCH = 'Sources/example.swift\n@@ -1,2 +1,2 @@\n-let workspaceValue = "before"\n+let workspaceValue = "after"\n let same = 3\n\nREADME.md\n@@ -1 +1 @@\n-old docs\n+new docs'
+TOOL_DETAILS = {
+    't1': 'rg --files ios/CodexLink\n\n\x1b[32mNativeChat.swift\x1b[0m\n' + 'Synthetic tool output\n' * 40 + 'Synthetic output final page',
+    't2': TOOL_COMMAND + '\n\nSynthetic second output',
+    'f1': TOOL_PATCH,
+}
+
+
 class NativeFixture(SpyBridge):
     def __init__(self, home):
         super().__init__(home)
@@ -56,6 +65,10 @@ class NativeFixture(SpyBridge):
                 dict(key='t1', role='activity', kind='commandExecution', title='检查项目结构', text='rg --files ios/CodexLink', inputLength=len('rg --files ios/CodexLink'), status='completed', exitCode=0, durationMs=125, order=1, version='v1', truncated=True),
                 dict(key='a1', role='assistant', kind='agentMessage', text='已经梳理了项目、会话与输入区的交互。\n\n## 本次调整\n- 项目和任务分组\n- 原生消息流与执行状态\n- 输入区和审批操作\n\n```swift\nlet client = NativeAPI()\n```\n\n```diff\n--- a/example.swift\n+++ b/example.swift\n@@ -1 +1 @@\n-oldValue\n+newValueWithAnIntentionallyLongLineForNativeDiffWrappingInTheIOSConversation\n```', order=2, version='v1', truncated=False, forkable=True)]
         rows[2]['text'] += f'\n\n[新版 IPA](<{artifact_path}>)'
+        rows[2:2] = [
+            dict(key='t2', role='activity', kind='commandExecution', title='执行命令', text=TOOL_COMMAND, inputLength=len(TOOL_COMMAND), status='failed', exitCode=17, order=1, version='v1', truncated=True),
+            dict(key='f1', role='activity', kind='fileChange', title='文件变更', text=TOOL_PATCH[:80], inputLength=len(TOOL_PATCH), status='completed', order=1, version='v1', truncated=True),
+        ]
         if self.scroll_started is not None:
             stage = sum(time.monotonic() - self.scroll_started >= seconds for seconds in (18, 22))
             if stage != self.scroll_stage:
@@ -72,7 +85,11 @@ class NativeFixture(SpyBridge):
         meta = {'id': key, 'title': '优化 Codex Remote 交互', 'cwd': str(project), 'host': 'local', 'model': self.model, 'effort': self.effort, 'provider': 'synthetic', 'connected': self.connected, 'status': 'idle', 'historyComplete': True,
                 'requests': [{'id': 'request-1', 'supported': True, 'method': 'item/commandExecution/requestApproval', 'params': {'command': 'echo synthetic-only', 'reason': '测试原生审批组件'}}], 'submissions': []}
         if mode == 'detail':
-            return {'key': 't1', 'version': 'v1', 'text': 'rg --files ios/CodexLink\n\n\x1b[32mNativeChat.swift\x1b[0m\nSynthetic tool output', 'offset': 0, 'next': None}
+            row_key = options['cursor'].split('.')[-1]
+            text = TOOL_DETAILS[row_key]
+            offset = options.get('offset', 0)
+            end = min(len(text), offset + 256)
+            return {'key': row_key, 'version': 'v1', 'text': text[offset:end], 'offset': offset, 'next': end if end < len(text) else None}
         return {'epoch': 'synthetic', 'sequence': self.sequence, 'rows': rows if mode == 'page' or options.get('after') != self.sequence else [], 'before': 'synthetic.u1', 'hasMore': False, 'meta': meta, 'files': [{'id': artifact_id, 'reference': str(artifact_path), 'name': artifact_path.name, 'image': False}]}
     def send(self, thread, text, identifier, *_, **__):
         if text == 'Synthetic scroll regression':
