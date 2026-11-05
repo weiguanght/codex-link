@@ -12,7 +12,7 @@
 | 后续消息默认方式 | `CodexRemoteHostManagementViewModel._followUpBehavior` / `_followUpBehaviorSetting`，访问器 `0x210d860` | `NativeSettings.swift`、`ChatDraft` | 新增发送新消息／完成后发送／补充当前任务的默认选择，复用已有 `send/queue/steer` 网关实现 |
 | diff 长行换行 | 同一 ViewModel 的 `_diffLineWrappingEnabled` / `_diffLineWrappingSetting` | `NativeDiff.swift`、`NativeComponents.swift`、`NativeSettings.swift` | 新增 `diff/patch` 代码块的增删/文件/hunk 着色、自动换行与横向滚动切换 |
 | 证据导航 | `manifest.json`、`function_index.csv`、`direct_calls.jsonl` | `scripts/export-reverse-navigation.py` | 新增有数量上限的 Serena C 导航投影；逐符号回指真实伪代码、汇编与归属证据 |
-| 工作区浏览与搜索 | `CodexRemoteWorkspaceBrowserViewModel` 的目录缓存、搜索和路径回填；访问器 `0x23bfa0c` | `NativeWorkspaceBrowser.swift`、`mac/workspace_reader.py`、`mac/native_http.py` | 新增会话目录浏览、文件名／路径搜索、文本预览和路径回填 |
+| 工作区浏览、搜索与编辑 | `CodexRemoteWorkspaceBrowserViewModel` 的目录缓存、搜索和路径回填；访问器 `0x23bfa0c` | `NativeWorkspaceBrowser.swift`、`mac/workspace_reader.py`、`mac/native_http.py` | 新增会话目录浏览、文件名／路径搜索、受修订冲突检查保护的文本预览与编辑 |
 | 工作区差异与评论 | `CodexRemoteWorkspaceDiffSheetViewModel`、`CodexRemoteWorkspaceDiffFile`、`CodexRemoteDiffCommentState`；访问器 `0x23bffe8`、`0x2f2f52c`、`0x23c08fc` | 同上，以及 `NativeDiff.swift`、`NativeModels.swift` | 新增未暂存／已暂存文件差异、未跟踪文件预览和文件评论追加草稿；详见 [工作区说明](workspace-browser.md) |
 
 字段与访问器证据可以确认原程序存在这些状态/接口；本项目的文件格式、配对隔离、默认行为和 UI 是独立实现，未声称与原版逐分支一致。`send/queue/steer` 是既有网关取值，未声称就是原版枚举的原始编码。
@@ -71,7 +71,7 @@ serena daemon stop /absolute/path/to/codex-link/build/reverse-navigation
 - 最新模拟器冒烟为 PASS，14 项检查，新增中文／空格／编码／行号文件引用的高亮与授权下载、模型强度选项及默认值联动；保留工作区、草稿、TLS 与发送验证。见 `build/ios-smoke-result.json`、`build/links-model-smoke.log`。
 - 最新 UI 流程为 1 项通过、0 失败，耗时 141.341 秒；见 `build/native-ui-test.log`。新增文件引用点击打开系统分享面板、切换模型后的强度菜单、保存及重新打开回读；同时覆盖历史阅读位置、工作区搜索／预览、路径回填、已暂存差异、评论回填、设置与项目创建。
 - 产品代码的设备 Release 与普通模拟器 Debug 均构建成功；见 `build/links-model-device-build.log`、`build/links-model-build.log`。两种 IPA 位于 `build/`，SHA-256 记录在 `build/SHA256SUMS.txt`，未执行真机安装。链接与菜单修复只需更新 IPA。
-- 网关、历史、设置、项目、资源与新工作区读取层的 98 项 Python 回归通过；见 `build/workspace-regression-tests.log`。全目录发现时，另一个既有清理模块因缺少根目录的 `清理CodexExec对话.command` 无法加载；记录在 `build/workspace-python-tests.log`，本轮未改动清理工具。
+- 最近全量 Python 测试 102 项通过。Xcode、模拟器和设备 Release 构建已通过；生成 IPA 位于本地忽略的 `build/`，真机安装仍需单独验收。日志和验证产物不随源码提交。
 - 最新普通 Debug 的 Serena IndexStore 索引包含 150 units、7,980 edges、17,643 occurrences；见 `build/workspace-xcode-index.json`。`workspace-context-callers.json` 已确认聊天界面调用草稿回填方法。该图是本工程编译快照，本轮未启动项目 daemon。
 - `build/links-model-verification.json` 汇总本次修复验证及安装包散列；此前工作区验证见 `build/workspace-verification.json`，工作区截图为 `build/workspace-diff.png`、`build/workspace-comment.png`。
 
