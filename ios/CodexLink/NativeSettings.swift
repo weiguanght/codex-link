@@ -69,6 +69,7 @@ struct NativeCodexSettings: View {
     let api: NativeAPI
     @ObservedObject var workspace: WorkspaceModel
     let initialScope: String
+    var permissionsOnly = false
     @Environment(\.dismiss) private var dismiss
     @State private var scope = ""
     @State private var requestedScope: String?
@@ -82,7 +83,14 @@ struct NativeCodexSettings: View {
     @State private var discard = false
     @State private var close = false
     @State private var models: [JSONValue] = []
-    private let groups: [(String, [String])] = [("模型与推理", ["model", "model_reasoning_effort", "model_reasoning_summary", "model_verbosity"]), ("搜索与权限", ["web_search", "approval_policy", "sandbox_mode"]), ("指令", ["developer_instructions"])]
+    private let allGroups: [(String, [String])] = [("模型与推理", ["model", "model_reasoning_effort", "model_reasoning_summary", "model_verbosity"]), ("搜索与权限", ["web_search", "approval_policy", "sandbox_mode"]), ("指令", ["developer_instructions"])]
+    private var groups: [(String, [String])] {
+        guard permissionsOnly else { return allGroups }
+        return allGroups.compactMap { title, fields in
+            let selected = fields.filter { ["approval_policy", "sandbox_mode"].contains($0) }
+            return selected.isEmpty ? nil : (title, selected)
+        }
+    }
     private let labels = ["model": "默认模型", "model_reasoning_effort": "推理强度", "model_reasoning_summary": "推理摘要", "model_verbosity": "回答详略", "web_search": "联网搜索", "approval_policy": "审批策略", "sandbox_mode": "执行沙盒", "developer_instructions": "开发者指令"]
     private var changes: [String: JSONValue] {
         var result: [String: JSONValue] = [:]
@@ -101,7 +109,7 @@ struct NativeCodexSettings: View {
                     if changes.isEmpty { Task { await read(key) } } else { discard = true }
                 }
                 NativeNotice(text: value["reason"].string)
-                Text("保存后续会话的默认行为；当前任务不热更新。").font(.footnote).foregroundStyle(.secondary)
+                Text(permissionsOnly ? "权限设置作用于之后加载的会话；当前任务不热更新。" : "保存后续会话的默认行为；当前任务不热更新。").font(.footnote).foregroundStyle(.secondary)
             }
             if !value["revision"].string.isEmpty {
                 ForEach(groups, id: \.0) { group in
@@ -125,7 +133,7 @@ struct NativeCodexSettings: View {
                 Button { if changes.isEmpty { Task { await read(scope) } } else { requestedScope = scope; discard = true } } label: { Label("重新读取", systemImage: "arrow.clockwise") }
             }
         }
-        .navigationTitle(scope.isEmpty ? "Codex 默认行为" : "项目有效配置").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle(permissionsOnly ? "权限设置" : scope.isEmpty ? "Codex 默认行为" : "项目有效配置").navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("返回") { if changes.isEmpty { dismiss() } else { close = true } }.disabled(busy) }

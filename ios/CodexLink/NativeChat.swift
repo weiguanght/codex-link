@@ -12,6 +12,7 @@ struct NativeChatView: View {
     let onSettings: () -> Void
     var showSidebar = true
     @State private var threadSettings = false
+    @State private var permissionSettings = false
     @State private var sendSettings = false
     @State private var chooseSendMode = false
     @State private var contextUsage: JSONValue = .null
@@ -95,6 +96,7 @@ struct NativeChatView: View {
         .background(Color.linkCanvas)
         .toolbar { navigationControls }
         .sheet(isPresented: $threadSettings) { NativeThreadSettings(chat: chat) }
+        .sheet(isPresented: $permissionSettings) { NavigationStack { NativeCodexSettings(api: chat.api, workspace: workspace, initialScope: "", permissionsOnly: true) } }
         .sheet(isPresented: $sendSettings) { messageSendSettings }
         .sheet(isPresented: $chooseSendMode) { sendModeChooser }
         .task(id: chat.session?.identity) {
@@ -170,7 +172,7 @@ struct NativeChatView: View {
                         completeBack()
                     }).accessibilityIdentifier("native.chat.back")
                 } else if showSidebar {
-                    NativeIconButton(symbol: "sidebar.left", label: "项目与对话", action: onSidebar).accessibilityIdentifier("native.sidebar")
+                    NativeIconButton(symbol: "line.3.horizontal", label: "项目与对话", action: onSidebar).accessibilityIdentifier("native.sidebar")
                 }
             }
             ToolbarItem(placement: .principal) {
@@ -190,17 +192,14 @@ struct NativeChatView: View {
             }
             ToolbarItem(placement: .navigationBarTrailing) {
                 if chat.session == nil {
-                    NativeIconButton(symbol: "slider.horizontal.3", label: "设置", action: onSettings).accessibilityIdentifier("native.home.settings")
-                }
-                if chat.session != nil {
+                    NativeIconButton(symbol: "gearshape", label: "设置", action: onSettings).accessibilityIdentifier("native.home.settings")
+                } else {
                     Menu { chatDropdown } label: {
                         Image(systemName: "ellipsis").font(.system(size: 19, weight: .medium))
                             .frame(width: 44, height: 44).contentShape(Rectangle())
                     }
                     .accessibilityLabel("会话菜单")
                     .accessibilityIdentifier("native.chat.menu")
-                } else {
-                    NativeIconButton(symbol: "square.and.pencil", label: "新建对话", action: { onNewChat("") })
                 }
             }
     }
@@ -216,6 +215,8 @@ struct NativeChatView: View {
             menuAction("模型与推理", icon: "cpu", identifier: "native.thread.settings", enabled: chat.connected && !chat.readOnly) { threadSettings = true }
             Divider()
             menuAction("消息发送设置", icon: "slider.horizontal.3", identifier: "native.send.settings", enabled: !chat.readOnly) { sendSettings = true }
+            Divider()
+            menuAction("权限设置", icon: "checkmark.shield", identifier: "native.permission.settings", enabled: chat.connected) { permissionSettings = true }
             Divider()
             if let session = chat.session {
                 NativeSessionMenu(model: workspace, row: session, expandedLabel: true)
