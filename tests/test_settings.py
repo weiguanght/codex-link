@@ -269,8 +269,11 @@ for line in sys.stdin:
         for mode in ('ok', 'error', 'unsupported', 'timeout', 'oversize'):
             with self.subTest(mode=mode):
                 root, exe = self.fake(mode)
-                rpc = SettingsRPC(root, exe, timeout=.1); rpc.MAX_LINE = 1024
+                # Give the Python fixture time to start on a loaded build host;
+                # keep the tight request timeout for the actual RPC failure cases.
+                rpc = SettingsRPC(root, exe, timeout=2); rpc.MAX_LINE = 1024
                 with rpc:
+                    rpc.timeout = .1
                     if mode == 'ok': self.assertEqual(rpc.request('config/read', {}), {'config': {}})
                     else:
                         with self.assertRaises(SettingsError) as error: rpc.request('config/read', {})

@@ -94,6 +94,28 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(db.read_bytes(), before)
         self.assertTrue(self.library.metadata(history.uid(1))['readOnly'])
 
+    def test_unread_and_project_assignment_persist_without_changing_cwd(self):
+        history.database(self.home, [{'number': 1, 'cwd': '/sample/original'}])
+        project = self.create()
+        identity = 'local|' + history.uid(1)
+        self.workspace.preferences([identity], {'unread': True, 'projectKey': project['key']})
+        row = self.library.list(project=project['key'])['sessions'][0]
+        self.assertTrue(row['unread'])
+        self.assertEqual(row['cwd'], '/sample/original')
+        reloaded = Workspace(self.root, self.workspace.hosts)
+        self.assertTrue(reloaded.snapshot()['sessionPrefs'][identity]['unread'])
+        self.workspace.preferences([identity], {'unread': False, 'projectKey': None})
+        self.assertEqual(self.library.list(project=project['key'])['total'], 0)
+        row = self.library.metadata(history.uid(1))
+        self.assertFalse(row['unread'])
+        self.assertEqual(row['projectKey'], 'local|/sample/original')
+        before = self.workspace.snapshot()
+        for changes in ({'unread': 'true'}, {'projectKey': 'unknown'}):
+            with self.assertRaises(ValueError): self.workspace.preferences([identity], changes)
+        with self.assertRaises(ValueError):
+            self.workspace.preferences(['ssh-host|' + history.uid(1)], {'projectKey': project['key']})
+        self.assertEqual(self.workspace.snapshot(), before)
+
     def test_browse_only_lists_directories_and_paginates(self):
         for n in range(105): (self.folder / str(n)).mkdir()
         (self.folder / 'private.txt').write_text('not a directory')
@@ -185,6 +207,51 @@ class WorkspaceHTTPTests(unittest.TestCase):
         self.assertEqual(self.request('/api/workspace/preferences', body, headers)[0], 404)
         self.assertEqual(self.workspace.snapshot()['sessionPrefs'], {})
         self.assertEqual(self.request('/api/workspace/preferences', body, {'Cookie': self.cookie})[0], 403)
+
+    def test_delete_requires_auth_csrf_confirmation_local_and_idle_state(self):
+        from bridge.service import LiveSession
+        path = '/api/workspace/delete'
+        body = {'id': history.uid(2), 'confirmed': True}
+        self.assertEqual(self.request(path, body, {'Origin': self.base})[0], 401)
+        headers = self.authenticate()
+        self.assertEqual(self.request(path, body, {'Cookie': self.cookie, 'Origin': self.base})[0], 403)
+        self.assertEqual(self.request(path, {'id': history.uid(2)}, headers)[0], 403)
+        with patch('mac.workspace_http.delete_conversation') as perform:
+            with patch.object(self.server.reading, 'metadata', return_value={'id': history.uid(2), 'host': 'ssh-test', 'readOnly': False, '_database': True}):
+                self.assertEqual(self.request(path, dict(body, host='ssh-test'), headers)[0], 403)
+            perform.assert_not_called()
+        self.bridge.data_dir = Path(self.temp.name)
+        session = LiveSession(history.uid(2))
+        self.bridge.session = lambda *a, **k: session
+        self.bridge.live = {session.id: session}
+        session.state = {'turns': [{'status': 'inProgress'}]}
+        self.assertEqual(self.request(path, body, headers)[0], 400)
+        session.state = None
+        history.log(self.home, 2)
+        code, result, _ = self.request(path, body, headers)
+        self.assertEqual(code, 200, result)
+        self.assertTrue(result['deleted'])
+        self.assertEqual(self.request('/api/session-meta/' + history.uid(2), headers=headers)[0], 404)
+        self.assertEqual(self.request('/api/session-meta/' + history.uid(1), headers=headers)[0], 200)
+        self.assertTrue(Path(result['backup']).is_dir())
+        self.assertEqual(self.bridge.sent, [])
+
+    def test_delete_read_only_database_and_jsonl_only_sessions_without_activation(self):
+        self.bridge.data_dir = Path(self.temp.name)
+        self.bridge.live = {}
+        headers = self.authenticate()
+        orphan = history.uid(700)
+        logs = [history.log(self.home, number) for number in (1, 700)]
+        for key, log in zip((history.uid(1), orphan), logs):
+            self.assertTrue(self.server.reading.metadata(key)['readOnly'])
+            with patch.object(self.bridge.store, 'get', side_effect=AssertionError('desktop gate used')):
+                code, result, _ = self.request('/api/workspace/delete', {'id': key, 'confirmed': True}, headers)
+            self.assertEqual(code, 200, result)
+            self.assertTrue(result['deleted'])
+            self.assertFalse(log.exists())
+            self.assertTrue(Path(result['backup']).is_dir())
+            self.assertEqual(self.request('/api/session-meta/' + key, headers=headers)[0], 404)
+        self.assertEqual(self.bridge.sent, [])
 
     def test_browse_and_agents_require_auth(self):
         for path in ('/api/workspace/directories', '/api/workspace/agents'):

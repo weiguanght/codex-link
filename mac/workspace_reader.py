@@ -1,4 +1,4 @@
-"""Bounded, read-only access to one session's local working directory."""
+"""Bounded workspace browsing, preview, editing and explicit file import."""
 import codecs
 import contextlib
 import hashlib
@@ -64,29 +64,41 @@ class WorkspaceReader:
     def entry(entry, prefix):
         info = entry.stat(follow_symlinks=False)
         kind = 'directory' if stat.S_ISDIR(info.st_mode) else 'file' if stat.S_ISREG(info.st_mode) else 'unavailable'
+        suffix = Path(entry.name).suffix.casefold().lstrip('.') if kind == 'file' else ''
         return {'name': entry.name, 'path': prefix + entry.name, 'kind': kind,
-                'bytes': info.st_size if kind == 'file' else None}
+                'bytes': info.st_size if kind == 'file' else None,
+                'modified': info.st_mtime, 'created': getattr(info, 'st_birthtime', info.st_ctime),
+                'type': suffix or ('文件夹' if kind == 'directory' else '未知'),
+                'hidden': entry.name.startswith('.')}
 
-    def tree(self, path='', offset=0):
+    def tree(self, path='', offset=0, include_hidden=False, sort='name', descending=False):
         if not 0 <= offset <= SCAN_ENTRIES:
             raise ValueError('分页位置无效')
+        if sort not in ('name', 'modified', 'created', 'size', 'type'):
+            raise ValueError('排序方式无效')
         prefix = path + '/' if path else ''
         rows = []; limited = False
         with self.opened(path, directory=True) as descriptor, os.scandir(descriptor) as entries:
             for count, entry in enumerate(entries):
                 if count >= SCAN_ENTRIES:
                     limited = True; break
-                if entry.name.casefold() == '.git':
+                if entry.name.casefold() == '.git' or (entry.name.startswith('.') and not include_hidden):
                     continue
                 try:
                     rows.append(self.entry(entry, prefix))
                 except FileNotFoundError:
                     continue
-        rows.sort(key=lambda r: (r['kind'] != 'directory', r['name'].casefold(), r['name']))
+        key = {'name': lambda r: r['name'].casefold(), 'modified': lambda r: r['modified'],
+               'created': lambda r: r['created'], 'size': lambda r: r['bytes'] or 0,
+               'type': lambda r: r['type'].casefold()}[sort]
+        rows.sort(key=lambda r: r['name'].casefold())
+        rows.sort(key=key, reverse=descending)
+        rows.sort(key=lambda r: r['kind'] != 'directory')
         return {'root': str(self.root), 'path': path, 'entries': rows[offset:offset + 100],
-                'hasMore': offset + 100 < len(rows), 'limited': limited}
+                'hasMore': offset + 100 < len(rows), 'limited': limited,
+                'sort': sort, 'descending': bool(descending), 'includeHidden': bool(include_hidden)}
 
-    def search(self, query):
+    def search(self, query, include_hidden=False):
         if not isinstance(query, str) or not 1 <= len(query.strip()) <= 200:
             raise ValueError('请输入 1–200 个字符的文件名或相对路径')
         query = query.strip().casefold()
@@ -98,7 +110,7 @@ class WorkspaceReader:
                     scanned += 1
                     if scanned > SCAN_ENTRIES or len(rows) >= 100:
                         limited = True; return
-                    if entry.name in SEARCH_SKIP or entry.name.casefold() == '.git':
+                    if entry.name.casefold() == '.git' or (entry.name in SEARCH_SKIP and not include_hidden) or (entry.name.startswith('.') and not include_hidden):
                         continue
                     try:
                         row = self.entry(entry, prefix)
@@ -122,7 +134,8 @@ class WorkspaceReader:
         with self.opened(directory=True) as descriptor:
             visit(descriptor, '', 0)
         rows.sort(key=lambda r: (r['kind'] != 'directory', r['path'].casefold()))
-        return {'root': str(self.root), 'path': '', 'entries': rows, 'hasMore': False, 'limited': limited}
+        return {'root': str(self.root), 'path': '', 'entries': rows, 'hasMore': False, 'limited': limited,
+                'sort': 'name', 'descending': False, 'includeHidden': bool(include_hidden)}
 
     def file(self, path):
         with self.opened(path) as descriptor:
@@ -182,6 +195,31 @@ class WorkspaceReader:
                 os.close(descriptor)
         return {'path': path, 'text': text, 'bytes': len(data), 'revision': hashlib.sha256(data).hexdigest(), 'truncated': False, 'previewable': True}
 
+    def import_file(self, directory, name, data):
+        if not isinstance(name, str) or not name or name in ('.', '..') or '/' in name or '\\' in name or '\x00' in name or name.startswith('.'):
+            raise ValueError('导入文件名无效')
+        if not isinstance(data, bytes) or not data or len(data) > 20 * 1024 * 1024:
+            raise ValueError('导入文件需为 1 字节至 20 MiB')
+        with self.opened(directory, directory=True) as parent:
+            descriptor = None
+            created = False
+            try:
+                descriptor = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=parent)
+                created = True
+                with os.fdopen(descriptor, 'wb') as stream:
+                    descriptor = None
+                    stream.write(data); stream.flush(); os.fsync(stream.fileno())
+            except FileExistsError:
+                raise WorkspaceReadError('目标文件已存在，不会覆盖') from None
+            except OSError:
+                if created:
+                    try: os.unlink(name, dir_fd=parent)
+                    except OSError: pass
+                raise
+            finally:
+                if descriptor is not None: os.close(descriptor)
+        return {'path': (directory + '/' if directory else '') + name, 'bytes': len(data)}
+
     def git(self, *args, overrides=()):
         # A repo can configure executable filters as well as external diffs.
         # Never inherit a caller's alternate repository/object/config settings.
@@ -234,7 +272,54 @@ class WorkspaceReader:
             overrides.extend([(driver + '.clean', ''), (driver + '.process', ''), (driver + '.required', 'false')])
         return overrides
 
-    def changes(self, source='unstaged'):
+    def repositories(self):
+        rows = []; scanned = 0; limited = False
+        deadline = time.monotonic() + 1
+        def visit(path, depth):
+            nonlocal scanned, limited
+            if scanned >= SCAN_ENTRIES or len(rows) >= 100 or time.monotonic() >= deadline:
+                limited = True; return
+            try:
+                with self.opened(path, directory=True) as descriptor:
+                    try:
+                        marker = os.stat('.git', dir_fd=descriptor, follow_symlinks=False)
+                        if stat.S_ISDIR(marker.st_mode) or stat.S_ISREG(marker.st_mode):
+                            rows.append({'path': path, 'name': path or '项目根目录'})
+                    except FileNotFoundError:
+                        pass
+                    if depth == 3: return
+                    with os.scandir(descriptor) as entries:
+                        children = []
+                        for entry in entries:
+                            scanned += 1
+                            if scanned >= SCAN_ENTRIES or time.monotonic() >= deadline:
+                                limited = True; break
+                            if entry.name in SEARCH_SKIP or entry.name.casefold() == '.git': continue
+                            if entry.is_dir(follow_symlinks=False):
+                                children.append(entry.name)
+                    for name in sorted(children):
+                        visit(path + '/' + name if path else name, depth + 1)
+                        if limited: break
+            except (FileNotFoundError, PermissionError, NotADirectoryError):
+                pass
+        visit('', 0)
+        rows.sort(key=lambda row: (bool(row['path']), row['path'].casefold()))
+        return {'root': str(self.root), 'repositories': rows, 'limited': limited, 'maxDepth': 3}
+
+    def selected_repository(self, path):
+        if not path: return self
+        with self.opened(path, directory=True):
+            expected = self.root.joinpath(*relative_path(path))
+            reader = WorkspaceReader(str(expected))
+            if reader.root != expected:
+                raise ValueError('请选择工作区内的 Git 仓库')
+            return reader
+
+    def changes(self, source='unstaged', repository_path=''):
+        if repository_path:
+            result = self.selected_repository(repository_path).changes(source)
+            for row in result['files']: row['path'] = repository_path + '/' + row['path']
+            return dict(result, root=str(self.root), repository=repository_path, repositoryRoot=result['root'])
         if source not in ('unstaged', 'staged'):
             raise ValueError('差异来源无效')
         overrides = self.repository()
@@ -256,14 +341,24 @@ class WorkspaceReader:
             if code: raise WorkspaceReadError('无法读取未跟踪文件')
             for name in raw.split(b'\x00'):
                 if not name: continue
-                path = os.fsdecode(name); relative_path(path)
+                path = os.fsdecode(name)
+                # Git reports untracked nested repositories as directory paths.
+                # They are selectable repositories, rather than previewable files.
+                if path.endswith('/'): continue
+                relative_path(path)
                 rows.append({'path': path, 'added': None, 'removed': None, 'untracked': True})
         rows.sort(key=lambda r: r['path'].casefold())
-        return {'root': str(self.root), 'source': source, 'files': rows[:200], 'limited': len(rows) > 200,
+        return {'root': str(self.root), 'repository': '', 'repositoryRoot': str(self.root), 'source': source, 'files': rows[:200], 'limited': len(rows) > 200,
                 'fileCount': len(rows), 'added': sum(r['added'] or 0 for r in rows), 'removed': sum(r['removed'] or 0 for r in rows)}
 
-    def patch(self, path, source='unstaged'):
+    def patch(self, path, source='unstaged', repository_path=''):
         relative_path(path)
+        if repository_path:
+            reader = self.selected_repository(repository_path)
+            prefix = repository_path + '/'
+            if not path.startswith(prefix): raise ValueError('文件不在所选 Git 仓库内')
+            result = reader.patch(path[len(prefix):], source)
+            return dict(result, path=path, repository=repository_path)
         if source not in ('unstaged', 'staged'):
             raise ValueError('差异来源无效')
         overrides = self.repository()

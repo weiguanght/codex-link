@@ -303,6 +303,77 @@ class ReaderTests(unittest.TestCase):
                         + record('event_msg', {'type': 'agent_message', 'message': 'still readable'}))
         self.assertEqual(self.reader.read(self.metadata(path))['total'], 2)
 
+    def test_token_usage_snapshot_and_estimated_cost(self):
+        usage = {'input_tokens': 1000, 'cached_input_tokens': 400, 'output_tokens': 100,
+                 'reasoning_output_tokens': 25, 'total_tokens': 1100}
+        path = log(self.home, 1, record('event_msg', {'type': 'token_count', 'info': {'total_token_usage': usage}}))
+        meta = dict(self.metadata(path), model='gpt-5.1')
+        result = self.reader.read(meta)
+        summary = result['meta']['usage']
+        self.assertEqual(summary['input_tokens'], 1000)
+        self.assertEqual(summary['cached_input_tokens'], 400)
+        self.assertAlmostEqual(summary['estimatedCostUSD'], 0.0018)
+        cached = self.reader.cache[str(path.resolve())]
+        self.reader.read(meta)
+        self.assertIs(self.reader.cache[str(path.resolve())], cached, 'Unchanged usage logs should reuse their index')
+
+    def test_unknown_earlier_model_is_not_repriced_as_latest_model(self):
+        path = log(self.home, 1,
+                   record('event_msg', {'type': 'token_count', 'info': {'total_token_usage': {'input_tokens': 100, 'total_tokens': 100}}})
+                   + record('turn_context', {'model': 'gpt-5.4'})
+                   + record('event_msg', {'type': 'token_count', 'info': {'total_token_usage': {'input_tokens': 200, 'total_tokens': 200}}}))
+        usage = self.reader.read(self.metadata(path))['meta']['usage']
+        self.assertIsNone(usage['estimatedCostUSD'])
+        self.assertIsNone(usage['pricingBreakdown'][0]['estimatedCostUSD'])
+        self.assertEqual(usage['pricingBreakdown'][1]['estimatedCostUSD'], 0.00025)
+
+    def test_usage_prices_each_model_tier_and_accumulates_across_resets(self):
+        first = {'input_tokens': 1000, 'cached_input_tokens': 400, 'output_tokens': 100,
+                 'reasoning_output_tokens': 25, 'total_tokens': 1100}
+        second = {'input_tokens': 1500, 'cached_input_tokens': 500, 'output_tokens': 200,
+                  'reasoning_output_tokens': 50, 'total_tokens': 1700}
+        reset = {'input_tokens': 200, 'cached_input_tokens': 50, 'output_tokens': 50,
+                 'reasoning_output_tokens': 10, 'total_tokens': 250}
+        def snapshot(total):
+            return record('event_msg', {'type': 'token_count', 'info': {'total_token_usage': total}})
+        path = log(self.home, 1,
+                   record('turn_context', {'turn_id': 'a', 'model': 'gpt-5.4'}) + snapshot(first)
+                   + record('turn_context', {'turn_id': 'b', 'model': 'gpt-6.1-sol', 'service_tier': 'priority'})
+                   + snapshot(second) + snapshot(second)
+                   + record('event_msg', {'type': 'token_count', 'info': None}) + snapshot(reset))
+        usage = self.reader.read(dict(self.metadata(path), model='wrong-database-model'))['meta']['usage']
+        self.assertEqual(usage['input_tokens'], 1700)
+        self.assertEqual(usage['cached_input_tokens'], 550)
+        self.assertEqual(usage['output_tokens'], 250)
+        self.assertEqual(usage['total_tokens'], 1950)
+        self.assertAlmostEqual(usage['estimatedCostUSD'], 0.00833)
+        self.assertEqual(len(usage['pricingBreakdown']), 2)
+        self.assertEqual(usage['pricingTiers'], ['standard', 'fast'])
+        self.assertEqual(usage['pricingBreakdown'][0]['model'], 'gpt-5.4')
+        self.assertAlmostEqual(usage['pricingBreakdown'][0]['estimatedCostUSD'], 0.0031)
+
+    def test_context_usage_uses_latest_turn_instead_of_cumulative_tokens(self):
+        info = {'total_token_usage': {'total_tokens': 950000},
+                'last_token_usage': {'total_tokens': 24000}, 'model_context_window': 128000}
+        path = log(self.home, 1, record('event_msg', {'type': 'token_count', 'info': info}))
+        result = self.reader.read(self.metadata(path))['meta']
+        self.assertEqual(result['context'], {'usedTokens': 24000, 'windowTokens': 128000})
+        self.assertEqual(result['usage']['total_tokens'], 950000)
+        # Compaction is allowed to decrease current context.
+        with path.open('a') as stream:
+            info['last_token_usage']['total_tokens'] = 4000
+            stream.write(record('event_msg', {'type': 'token_count', 'info': info}))
+        self.assertEqual(self.reader.read(self.metadata(path))['meta']['context']['usedTokens'], 4000)
+        # Rate-limit-only events contain no new token sample.
+        with path.open('a') as stream:
+            stream.write(record('event_msg', {'type': 'token_count', 'info': None, 'rate_limits': {}}))
+        self.assertEqual(self.reader.read(self.metadata(path))['meta']['context']['usedTokens'], 4000)
+        from mac.history_reader import context_snapshot
+        for invalid in ({}, {'last_token_usage': {'total_tokens': True}, 'model_context_window': 128000},
+                        {'last_token_usage': {'total_tokens': -1}, 'model_context_window': 128000},
+                        {'last_token_usage': {'total_tokens': 1}, 'model_context_window': 0}):
+            self.assertIsNone(context_snapshot(invalid))
+
     def test_repeated_user_prompt_after_answer_is_not_deduplicated(self):
         path = log(self.home, 1, record('event_msg', {'type': 'user_message', 'message': 'continue'})
                    + record('event_msg', {'type': 'agent_message', 'message': 'answer'}) + message('user', 'continue'))

@@ -3,6 +3,7 @@ import copy
 import json
 from pathlib import Path
 import sqlite3
+import subprocess
 import unittest
 from urllib.parse import urlencode
 
@@ -63,6 +64,20 @@ class NativeHTTPTests(unittest.TestCase):
         self.assertEqual(code, 200); self.assertIn('synthetic answer', detail['text'])
         self.assertEqual(self.calls, [])
         self.assertEqual(self.server.bridge.activated, [])
+
+    def test_session_usage_projection_reads_only_token_counts(self):
+        metadata = self.server.reading.metadata(history.uid(1))
+        usage = {'input_tokens': 1000, 'cached_input_tokens': 100, 'output_tokens': 250, 'total_tokens': 1250}
+        with open(metadata['rollout_path'], 'a') as stream:
+            stream.write(history.record('event_msg', {'type': 'token_count', 'info': {'total_token_usage': usage, 'last_token_usage': {'total_tokens': 600}, 'model_context_window': 128000}}))
+        path = '/api/native/v1/threads/' + history.uid(1) + '/usage'
+        code, result, _ = self.request(path, headers=self.authenticate())
+        self.assertEqual(code, 200)
+        self.assertEqual(result['usage']['input_tokens'], 1000)
+        self.assertEqual(result['usage']['output_tokens'], 250)
+        self.assertEqual(result['context'], {'usedTokens': 600, 'windowTokens': 128000})
+        self.assertIsNone(result['usage']['estimatedCostUSD'])
+        self.assertEqual(self.calls, [])
 
     def test_desktop_projection_retains_controller_and_explicit_log_is_readonly(self):
         headers = self.authenticate(); path = '/api/native/v1/threads/' + history.uid(2)
@@ -131,6 +146,29 @@ class NativeHTTPTests(unittest.TestCase):
         self.assertEqual((self.folder / 'example.txt').read_text(), 'Edited from phone')
         code, error, _ = self.request(path, body, headers)
         self.assertEqual(code, 409); self.assertEqual(error['code'], 'conflict')
+        self.assertEqual(self.server.bridge.activated, [])
+
+    def test_nested_workspace_repository_routes_and_guards(self):
+        folder = self.folder / 'apps/worker/service'; folder.mkdir(parents=True)
+        def git(*args):
+            return subprocess.check_output(['/usr/bin/git', '-C', str(folder), '-c', 'user.name=Synthetic', '-c', 'user.email=test@example.invalid', *args])
+        git('init', '-q'); (folder / 'file.txt').write_text('one\n')
+        git('add', '.'); git('commit', '-qm', 'fixture')
+        (folder / 'file.txt').write_text('two\n')
+        path = '/api/native/v1/threads/' + history.uid(2) + '/workspace/'
+        self.assertEqual(self.request(path + 'repositories')[0], 401)
+        headers = self.authenticate()
+        code, result, _ = self.request(path + 'repositories', headers=headers)
+        self.assertEqual(code, 200); self.assertEqual(result['repositories'][0]['path'], 'apps/worker/service')
+        query = {'repository': 'apps/worker/service', 'source': 'unstaged'}
+        code, changes, _ = self.request(path + 'changes?' + urlencode(query), headers=headers)
+        self.assertEqual(code, 200); self.assertEqual(changes['files'][0]['path'], 'apps/worker/service/file.txt')
+        code, result, _ = self.request(path + 'patch?' + urlencode(dict(query, path='apps/worker/service/file.txt')), headers=headers)
+        self.assertEqual(code, 200); self.assertIn('+two', result['text'])
+        self.assertEqual(self.request(path + 'changes?' + urlencode({'repository': '../escape'}), headers=headers)[0], 400)
+        self.assertEqual(self.request(path + 'patch?' + urlencode(dict(query, path='example.txt')), headers=headers)[0], 400)
+        self.assertEqual(self.request(path + 'repositories?view=log', headers=headers)[0], 403)
+        self.assertEqual(self.request(path.replace(history.uid(2), history.uid(1)) + 'repositories', headers=headers)[0], 403)
         self.assertEqual(self.server.bridge.activated, [])
 
     def test_native_sources_do_not_embed_web_ui(self):

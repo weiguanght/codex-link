@@ -20,6 +20,5 @@ DerivedData/
 xcuserdata/
 *.xcuserstate
 
-# Serena local caches and generated compiler-snapshot graph
-ios/.serena/cache/
-ios/.serena/memories/
+# Serena local configuration, caches and generated compiler-snapshot graph
+ios/.serena/

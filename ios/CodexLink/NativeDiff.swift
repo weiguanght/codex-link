@@ -1,5 +1,25 @@
 import SwiftUI
 
+struct NativeDiffStats: Equatable {
+    let added: Int
+    let removed: Int
+    init(_ document: NativeDiffDocument) {
+        added = document.files.reduce(0) { $0 + $1.additions }
+        removed = document.files.reduce(0) { $0 + $1.deletions }
+    }
+}
+struct NativeDiffStatsLabel: View {
+    let added: Int
+    let removed: Int
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("+\(added)").foregroundStyle(.green)
+            Text("−\(removed)").foregroundStyle(.red)
+        }.monospacedDigit().fixedSize()
+        .accessibilityElement(children: .combine).accessibilityLabel("+\(added) −\(removed)")
+    }
+}
+
 /// Parses unified patches, apply_patch blocks and the desktop's path + diff projection.
 /// Paths and code are data, never interpreted as Markdown, HTML or links.
 struct NativeDiffDocument {
@@ -20,6 +40,15 @@ struct NativeDiffDocument {
         var deletions: Int { lines.filter { $0.kind == .deletion }.count }
     }
     var files: [File] = []
+    var commonDirectory: String {
+        guard let first = files.first else { return "" }
+        var common = Array(first.path.components(separatedBy: "/").dropLast())
+        for file in files.dropFirst() {
+            let directory = Array(file.path.components(separatedBy: "/").dropLast())
+            common = Array(zip(common, directory).prefix(while: { $0 == $1 }).map { $0.0 })
+        }
+        return common.isEmpty ? "" : common.joined(separator: "/") + "/"
+    }
     init(_ content: String) {
         let source = content.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
         var file: File?, old: Int?, new: Int?, oldRemaining = 0, newRemaining = 0
@@ -129,10 +158,19 @@ struct NativeDiffDocument {
 struct NativeDiff: View {
     let content: String
     let wrapsLines: Bool
+    var compactFilePaths = false
     @State private var document = NativeDiffDocument("")
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 16) {
-            ForEach(document.files) { file in NativeDiffFile(file: file, wrapsLines: wrapsLines) }
+            let prefix = compactFilePaths ? document.commonDirectory : ""
+            if !prefix.isEmpty {
+                Label(prefix, systemImage: "folder").font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary).textSelection(.enabled)
+                    .accessibilityIdentifier("native.diff.commonDirectory")
+            }
+            ForEach(document.files) { file in
+                NativeDiffFile(file: file, wrapsLines: wrapsLines, displayPath: prefix.isEmpty ? file.path : String(file.path.dropFirst(prefix.count)))
+            }
         }
         .task(id: content) {
             let parsed = await Task.detached(priority: .userInitiated) { NativeDiffDocument(content) }.value
@@ -145,6 +183,7 @@ struct NativeDiff: View {
 private struct NativeDiffFile: View {
     let file: NativeDiffDocument.File
     let wrapsLines: Bool
+    let displayPath: String
     @State private var collapsed = false
     @State private var highlighted: [Int: AttributedString] = [:]
     @Environment(\.colorScheme) private var colorScheme
@@ -155,7 +194,7 @@ private struct NativeDiffFile: View {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: collapsed ? "chevron.right" : "chevron.down").font(.caption2).padding(.top, 3)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(file.path).font(.system(.caption, design: .monospaced).weight(.semibold)).multilineTextAlignment(.leading)
+                        Text(displayPath).font(.system(.caption, design: .monospaced).weight(.semibold)).multilineTextAlignment(.leading)
                         if let previous = file.previousPath, previous != file.path, previous != "/dev/null" {
                             Text("原路径：" + previous).font(.caption2).foregroundStyle(.secondary)
                         }

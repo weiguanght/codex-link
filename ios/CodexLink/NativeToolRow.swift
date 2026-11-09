@@ -84,6 +84,7 @@ enum NativeShellCommand {
 struct NativeToolRow: View {
     let row: NativeRow
     let text: String
+    let stats: NativeDiffStats?
     let open: () -> Void
     private var presentation: NativeToolPresentation { NativeToolPresentation(row: row, text: text) }
     private var summary: String {
@@ -100,13 +101,13 @@ struct NativeToolRow: View {
                 Image(systemName: presentation.icon).foregroundStyle(.secondary)
                 NativeSyntaxText(text: summary, language: presentation.language, singleLine: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                if let stats { NativeDiffStatsLabel(added: stats.added, removed: stats.removed).font(.caption).accessibilityIdentifier("native.tool.\(row.key).stats") }
                 Image(systemName: presentation.symbol).foregroundStyle(presentation.failed ? Color.red : Color.secondary)
                     .accessibilityLabel(presentation.status)
                 Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
             }.padding(.horizontal, 12).padding(.vertical, 11).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(Color.linkSurface.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
         .accessibilityIdentifier("native.tool.\(row.key)")
     }
 }
@@ -135,7 +136,14 @@ struct NativeToolDetail: View {
                             if let duration = row.durationMs { Text(String(format: "%.1fs", Double(duration) / 1000)).foregroundStyle(.secondary) }
                         }.font(.caption)
                         if row.kind == "fileChange" {
-                            NativeDiff(content: text, wrapsLines: diffWrapping)
+                            if let stats = chat.fileChangeStats(row) {
+                                HStack {
+                                    Text("代码变更").font(.subheadline.weight(.semibold))
+                                    Spacer()
+                                    NativeDiffStatsLabel(added: stats.added, removed: stats.removed)
+                                }.accessibilityIdentifier("native.tool.detail.stats")
+                            }
+                            NativeDiff(content: text, wrapsLines: diffWrapping, compactFilePaths: true)
                         } else {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text(row.kind == "commandExecution" ? "命令" : "输入").font(.subheadline.weight(.semibold))
@@ -177,7 +185,10 @@ struct NativeToolDetail: View {
                 }
                 ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } }
             }
-            .task(id: row?.version) { await loadRemaining() }
+            .task(id: row?.version) {
+                await loadRemaining()
+                if let row { await chat.loadFileChangeStats(row) }
+            }
         }
     }
     private func loadRemaining() async {

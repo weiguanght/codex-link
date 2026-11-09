@@ -9,6 +9,7 @@ struct NativeLibraryView: View {
     @State private var rename: LinkSession?
     @State private var renameProject: LinkProject?
     @State private var archive: LinkSession?
+    @State private var deleteSession: LinkSession?
     @State private var name = ""
     @State private var error = ""
     @State private var selected = Set<String>()
@@ -34,6 +35,12 @@ struct NativeLibraryView: View {
         .confirmationDialog("确认修改归档状态？", isPresented: Binding(get: { archive != nil }, set: { if !$0 { archive = nil } }), titleVisibility: .visible) {
             if let row = archive { Button(row.archived == true ? "取消归档" : "归档对话") { perform { try await model.archive(row) } } }
         } message: { Text("正在执行的任务需先结束。此操作会修改 Mac 上的对话归档状态。") }
+        .confirmationDialog("永久删除此会话？", isPresented: Binding(get: { deleteSession != nil }, set: { if !$0 { deleteSession = nil } }), titleVisibility: .visible) {
+            if let row = deleteSession {
+                Button("永久删除", role: .destructive) { perform { try await model.permanentlyDelete(row); deleteSession = nil } }
+            }
+            Button("取消", role: .cancel) { deleteSession = nil }
+        } message: { Text("将先备份，再删除 Mac 的 Codex 数据库、索引和此会话日志中的对应记录。应用内无法撤销；恢复备份保留在 Mac 网关数据目录。") }
         .confirmationDialog("修改 \(selected.count) 条对话的列表可见性？", isPresented: $batchConfirm, titleVisibility: .visible) {
             Button("确认") { let rows = model.sessions.filter { selected.contains($0.identity) }; perform { try await model.preferences(rows, changes: ["hidden": .bool(!model.hidden)]); selected = [] } }
         }
@@ -83,6 +90,7 @@ struct NativeLibraryView: View {
                             VStack(alignment: .leading, spacing: 6) {
                                 HStack(spacing: 6) {
                                     if row.pinned == true { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.secondary) }
+                                    if row.unread == true { Circle().fill(Color.accentColor).frame(width: 7, height: 7).accessibilityLabel("未读") }
                                     Text(row.title).font(.system(size: 16, weight: model.selected?.identity == row.identity ? .semibold : .regular)).foregroundStyle(.primary).lineLimit(2)
                                     Spacer(minLength: 0)
                                     if row.readOnly == true { Image(systemName: "doc.text").font(.caption).foregroundStyle(.tertiary).accessibilityLabel("只读历史") }
@@ -93,6 +101,7 @@ struct NativeLibraryView: View {
                                 }.font(.caption).foregroundStyle(.secondary)
                             }.padding(.vertical, 7).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                         }.buttonStyle(.plain).accessibilityIdentifier("native.session.\(row.id)")
+                        Menu { sessionActions(row) } label: { Image(systemName: "ellipsis").frame(width: 36, height: 40) }.accessibilityLabel("对话操作").accessibilityIdentifier("native.session.actions.\(row.id)")
                     }
                     .listRowBackground(model.selected?.identity == row.identity ? Color.linkSurface : Color.clear)
                     .contextMenu { sessionActions(row) }
@@ -123,13 +132,8 @@ struct NativeLibraryView: View {
                 HStack { Text("已选 \(selected.count)").font(.caption); Spacer(); Button("全选") { selected = Set(model.sessions.map(\.identity)) }; Button(model.hidden ? "恢复" : "隐藏") { batchConfirm = true }.disabled(selected.isEmpty); Button("完成") { selecting = false; selected = [] } }.padding(16).background(.regularMaterial)
             }
     }
-    @ViewBuilder private func sessionActions(_ row: LinkSession) -> some View {
-        Button(row.pinned == true ? "取消置顶" : "置顶", systemImage: "pin") { perform { try await model.preferences([row], changes: ["pinned": .bool(!(row.pinned ?? false))]) } }
-        if row.readOnly != true {
-            Button("重命名", systemImage: "pencil") { name = row.title; rename = row }
-            if row.host == "local" { Button(row.archived == true ? "取消归档" : "归档", systemImage: "archivebox") { archive = row } }
-        }
-        Button(row.hidden == true ? "恢复显示" : "从列表隐藏", systemImage: "eye.slash") { perform { try await model.preferences([row], changes: ["hidden": .bool(!(row.hidden ?? false))]) } }
+    private func sessionActions(_ row: LinkSession) -> some View {
+        NativeSessionActions(model: model, row: row, onRename: { rename = row }, onArchive: { archive = row }, onDelete: { deleteSession = row }, onError: { error = $0 })
     }
     private func projectMenu(_ project: LinkProject) -> some View {
         Menu {
@@ -146,6 +150,91 @@ struct NativeLibraryView: View {
         } label: { Image(systemName: "ellipsis").frame(width: 38, height: 38).contentShape(Rectangle()) }.accessibilityLabel(project.name + "的操作")
     }
     private func perform(_ action: @escaping () async throws -> Void) { Task { do { try await action() } catch { self.error = error.localizedDescription } } }
+}
+
+/// Shared actions for the library, home cards and chat toolbar.
+struct NativeSessionActions: View {
+    @ObservedObject var model: WorkspaceModel
+    let row: LinkSession
+    let onRename: () -> Void
+    let onArchive: () -> Void
+    let onDelete: () -> Void
+    let onError: (String) -> Void
+    var body: some View {
+        Button(row.pinned == true ? "取消置顶" : "置顶", systemImage: "pin") { perform { try await model.preferences([row], changes: ["pinned": .bool(!(row.pinned ?? false))]) } }
+            .keyboardShortcut("p", modifiers: [.option, .command])
+        if row.readOnly != true {
+            Button("重命名", systemImage: "pencil", action: onRename).keyboardShortcut("r", modifiers: [.option, .command])
+        }
+        Button(row.unread == true ? "标为已读" : "标为未读", systemImage: "envelope.badge") { perform { try await model.preferences([row], changes: ["unread": .bool(!(row.unread ?? false))]) } }
+            .keyboardShortcut("u", modifiers: [.shift, .command])
+        Menu("项目", systemImage: "folder") {
+            ForEach(model.projects.filter { $0.host == row.host && $0.registered == true }) { project in
+                Button { perform { try await model.preferences([row], changes: ["projectKey": string(project.key)]) } } label: {
+                    if row.projectKey == project.key { Label(project.name, systemImage: "checkmark") } else { Text(project.name) }
+                }
+            }
+            Button("按工作目录归类") { perform { try await model.preferences([row], changes: ["projectKey": .null]) } }
+        }
+        if row.readOnly != true {
+            Menu("分支", systemImage: "arrow.triangle.branch") { Button("从最新完成轮次分支") { perform { try await model.fork(row) } } }
+        }
+        Menu("复制", systemImage: "doc.on.doc") {
+            Button("复制深层链接") {
+                var components = URLComponents()
+                components.scheme = "codex"; components.host = "threads"; components.path = "/" + row.id
+                if row.host != "local" { components.queryItems = [URLQueryItem(name: "hostId", value: row.host)] }
+                UIPasteboard.general.string = components.url?.absoluteString
+            }.keyboardShortcut("l", modifiers: [.option, .command])
+            Button("复制为 Markdown") { perform { UIPasteboard.general.string = try await model.copyMarkdown(row) } }
+            Button("复制工作目录") { UIPasteboard.general.string = row.cwd ?? "" }.keyboardShortcut("c", modifiers: [.shift, .command])
+            Button("复制会话 ID") { UIPasteboard.general.string = row.id }
+        }
+        if row.readOnly != true && row.host == "local" {
+            Button(row.archived == true ? "取消归档" : "归档", systemImage: "archivebox", action: onArchive).keyboardShortcut("a", modifiers: [.shift, .command])
+        }
+        if row.host == "local" {
+            Button("永久删除…", systemImage: "trash", role: .destructive, action: onDelete)
+        }
+        Button(row.hidden == true ? "恢复显示" : "从列表隐藏", systemImage: "eye.slash") { perform { try await model.preferences([row], changes: ["hidden": .bool(!(row.hidden ?? false))]) } }
+    }
+    private func perform(_ action: @escaping () async throws -> Void) { Task { do { try await action() } catch { onError(error.localizedDescription) } } }
+}
+
+struct NativeSessionMenu: View {
+    @ObservedObject var model: WorkspaceModel
+    let row: LinkSession
+    var expandedLabel = false
+    @State private var rename = false
+    @State private var archive = false
+    @State private var deleteSession = false
+    @State private var error = ""
+    @State private var busy = false
+    private var current: LinkSession { model.sessions.first { $0.identity == row.identity } ?? row }
+    var body: some View {
+        Menu {
+            NativeSessionActions(model: model, row: current, onRename: { rename = true }, onArchive: { archive = true }, onDelete: { deleteSession = true }, onError: { error = $0 })
+        } label: {
+            if expandedLabel {
+                NativeDropdownLabel(title: "对话操作", symbol: "text.bubble")
+            } else { Image(systemName: "ellipsis").frame(width: 36, height: 40).contentShape(Rectangle()) }
+        }
+            .buttonStyle(NativeDropdownButtonStyle())
+            .disabled(busy).accessibilityLabel("对话操作").accessibilityIdentifier("native.session.actions.\(row.id)")
+            .sheet(isPresented: $rename) { NativeSessionRename(model: model, row: current) }
+            .confirmationDialog("确认修改归档状态？", isPresented: $archive, titleVisibility: .visible) {
+                Button(current.archived == true ? "取消归档" : "归档对话") { perform { try await model.archive(current) } }
+            } message: { Text("正在执行的任务需先结束。此操作会修改 Mac 上的对话归档状态。") }
+            .confirmationDialog("永久删除此会话？", isPresented: $deleteSession, titleVisibility: .visible) {
+                Button("永久删除", role: .destructive) { perform { try await model.permanentlyDelete(current) } }
+                Button("取消", role: .cancel) {}
+            } message: { Text("将先备份，再删除 Mac 的 Codex 数据库、索引和此会话日志中的对应记录。应用内无法撤销；恢复备份保留在 Mac 网关数据目录。") }
+            .alert("操作失败", isPresented: Binding(get: { !error.isEmpty }, set: { if !$0 { error = "" } })) { Button("好", role: .cancel) {} } message: { Text(error) }
+    }
+    private func perform(_ action: @escaping () async throws -> Void) {
+        busy = true
+        Task { defer { busy = false }; do { try await action() } catch { self.error = error.localizedDescription } }
+    }
 }
 
 struct NativeSessionRename: View {
@@ -236,30 +325,65 @@ struct NativeDirectoryPicker: View {
     @State private var folders: [JSONValue] = []
     @State private var busy = false
     @State private var error = ""
+    @State private var sort = "name"
+    @State private var descending = false
+    @State private var showHidden = false
     var body: some View {
         NavigationStack {
-            List {
-                Section("Mac 上的目录") {
-                    TextField("目录路径", text: $path).textInputAutocapitalization(.never).autocorrectionDisabled().onSubmit { load(path) }
-                    TextField("筛选子目录", text: $filter)
-                    Button("前往 / 筛选") { load(path) }
+            VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        TextField("搜索当前目录", text: $filter).textInputAutocapitalization(.never).autocorrectionDisabled().onSubmit { load(path) }
+                        Menu {
+                            Button("刷新", systemImage: "arrow.clockwise") { load(path) }
+                            Button("返回上一级", systemImage: "arrow.up") { if !result["parent"].string.isEmpty { load(result["parent"].string) } }.disabled(result["parent"].string.isEmpty)
+                            Menu("排序") {
+                                Picker("排序方式", selection: $sort) { Text("名称").tag("name"); Text("修改日期").tag("modified"); Text("创建日期").tag("created"); Text("大小").tag("size"); Text("类型").tag("type") }
+                                Button(descending ? "切换为升序" : "切换为降序", systemImage: descending ? "arrow.up" : "arrow.down") { descending.toggle(); load(path) }
+                            }
+                            Toggle("显示隐藏文件/目录", isOn: $showHidden)
+                        } label: { Image(systemName: "ellipsis").frame(width: 36, height: 36) }.accessibilityLabel("文件夹浏览选项")
+                    }.padding(.horizontal, 12).frame(height: 42).background(Color.linkSurface, in: RoundedRectangle(cornerRadius: 8))
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 5) {
+                            Button("/", action: { load("/") })
+                            ForEach(Array(path.split(separator: "/").enumerated()), id: \.offset) { index, part in
+                                Image(systemName: "chevron.right").font(.system(size: 9)).foregroundStyle(.tertiary)
+                                Button(String(part)) { load("/" + path.split(separator: "/").prefix(index + 1).joined(separator: "/")) }
+                                    .lineLimit(1).accessibilityIdentifier("native.projectPicker.breadcrumb.\(index)")
+                            }
+                            if path.isEmpty { Text("Mac 文件夹").foregroundStyle(.secondary) }
+                        }.font(.caption).buttonStyle(.plain)
+                    }
                 }
-                if !result["parent"].string.isEmpty { Button("上一级", systemImage: "arrow.up") { load(result["parent"].string) } }
-                ForEach(folders, id: \.self) { row in Button { load(row["path"].string) } label: { Label(row["name"].string, systemImage: "folder") } }
-                if result["hasMore"].bool { Button("更多文件夹") { load(result["path"].string, more: true) } }
-                if busy { ProgressView() }
-                NativeNotice(text: error, isError: true)
+                List {
+                    Section {
+                        ForEach(folders, id: \.self) { row in Button { load(row["path"].string) } label: { Label(row["name"].string, systemImage: "folder") } }
+                        if folders.isEmpty && !busy { Text("没有匹配的文件夹").foregroundStyle(.secondary) }
+                        if result["hasMore"].bool { Button("更多文件夹") { load(path, more: true) } }
+                        if busy { ProgressView().frame(maxWidth: .infinity) }
+                        NativeNotice(text: error, isError: true)
+                    } header: { Text(path) }
+                }.listStyle(.plain)
             }
             .navigationTitle("选择 Mac 文件夹").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("选择") { onSelect(result["path"].string); dismiss() }.disabled(result["path"].string.isEmpty || busy) } }
-            .task { path = initial; await read(initial) }.disabled(busy)
+            .task { path = initial; await read(initial) }
+            .task(id: filter) {
+                guard !filter.isEmpty else { return }
+                do { try await Task.sleep(nanoseconds: 300_000_000); if !Task.isCancelled { await read(path) } } catch {}
+            }
+            .onChange(of: sort) { _ in load(path) }
+            .onChange(of: descending) { _ in load(path) }
+            .onChange(of: showHidden) { _ in load(path) }
         }
     }
     private func load(_ path: String, more: Bool = false) { Task { await read(path, more: more) } }
     private func read(_ target: String, more: Bool = false) async {
         busy = true; error = ""; defer { busy = false }
         do {
-            result = try await api.value("/api/workspace/directories", query: ["path": target, "q": filter, "offset": String(more ? folders.count : 0)])
+            result = try await api.value("/api/workspace/directories", query: ["path": target, "q": filter, "offset": String(more ? folders.count : 0), "sort": sort, "descending": String(descending), "hidden": String(showHidden)])
             path = result["path"].string; folders = (more ? folders : []) + result["directories"].array
         } catch { self.error = error.localizedDescription }
     }

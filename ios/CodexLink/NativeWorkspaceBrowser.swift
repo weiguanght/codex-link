@@ -5,6 +5,10 @@ struct WorkspaceEntry: Decodable, Identifiable {
     let path: String
     let kind: String
     let bytes: Int?
+    let modified: Double?
+    let created: Double?
+    let type: String?
+    let hidden: Bool?
     var id: String { path }
 }
 struct WorkspaceTreePage: Decodable {
@@ -37,6 +41,19 @@ struct WorkspaceChanges: Decodable {
     let fileCount: Int
     let added: Int
     let removed: Int
+    let repository: String?
+    let repositoryRoot: String?
+}
+struct WorkspaceRepository: Decodable, Identifiable {
+    let path: String
+    let name: String
+    var id: String { path }
+}
+struct WorkspaceRepositories: Decodable {
+    let root: String
+    let repositories: [WorkspaceRepository]
+    let limited: Bool
+    let maxDepth: Int
 }
 struct WorkspacePatch: Decodable {
     let path: String
@@ -64,6 +81,9 @@ final class NativeWorkspaceBrowserModel: ObservableObject {
     @Published private(set) var loading = false
     @Published private(set) var error = ""
     @Published private(set) var changes: WorkspaceChanges?
+    @Published private(set) var repositories: [WorkspaceRepository] = []
+    @Published private(set) var repositoryLimited = false
+    @Published private(set) var repositoriesLoaded = false
     @Published private(set) var diffLoading = false
     @Published private(set) var diffError = ""
     @Published private(set) var opening: String?
@@ -76,17 +96,17 @@ final class NativeWorkspaceBrowserModel: ObservableObject {
     private var nextOffset = 0
     init(api: NativeAPI, session: LinkSession) { self.api = api; self.session = session }
     private func path(_ action: String) -> String { "/api/native/v1/threads/\(session.id)/workspace/\(action)" }
-    func loadFiles(directory: String, query: String, more: Bool = false) async {
+    func loadFiles(directory: String, query: String, sort: String = "name", descending: Bool = false, includeHidden: Bool = false, more: Bool = false) async {
         filesGeneration += 1; let token = filesGeneration
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let key = directory + "\n" + query
+        let key = [directory, query, sort, String(descending), String(includeHidden)].joined(separator: "\n")
         if loadedFilesKey != key { entries = []; hasMore = false; limited = false; nextOffset = 0 }
         loading = true; error = ""
         defer { if token == filesGeneration { loading = false } }
         do {
             if !query.isEmpty { try await Task.sleep(nanoseconds: 300_000_000) }
-            var params = ["host": session.host]
-            if query.isEmpty { params["path"] = directory; params["offset"] = String(more ? nextOffset : 0) }
+            var params = ["host": session.host, "hidden": String(includeHidden)]
+            if query.isEmpty { params["path"] = directory; params["offset"] = String(more ? nextOffset : 0); params["sort"] = sort; params["descending"] = String(descending) }
             else { params["q"] = query }
             let page: WorkspaceTreePage = try await api.request(path(query.isEmpty ? "tree" : "search"), query: params)
             guard !Task.isCancelled, token == filesGeneration else { return }
@@ -97,25 +117,34 @@ final class NativeWorkspaceBrowserModel: ObservableObject {
             root = page.root; hasMore = page.hasMore; limited = page.limited; loadedFilesKey = key
         } catch { if !Task.isCancelled && token == filesGeneration { self.error = error.localizedDescription } }
     }
-    func loadChanges(source: String) async {
+    func loadChanges(source: String, repository: String = "") async {
         changesGeneration += 1; let token = changesGeneration
-        if changes?.source != source { changes = nil }
+        if changes?.source != source || (changes?.repository ?? "") != repository { changes = nil }
         diffLoading = true; diffError = ""
         defer { if token == changesGeneration { diffLoading = false } }
         do {
-            let value: WorkspaceChanges = try await api.request(path("changes"), query: ["host": session.host, "source": source])
+            let value: WorkspaceChanges = try await api.request(path("changes"), query: ["host": session.host, "source": source, "repository": repository])
             guard !Task.isCancelled, token == changesGeneration else { return }
             root = value.root; changes = value
         } catch { if !Task.isCancelled && token == changesGeneration { diffError = error.localizedDescription } }
     }
-    func open(_ relativePath: String, diffSource: String? = nil) async {
+    func loadRepositories() async {
+        do {
+            let value: WorkspaceRepositories = try await api.request(path("repositories"), query: ["host": session.host])
+            guard !Task.isCancelled else { return }
+            root = value.root; repositories = value.repositories
+            repositoryLimited = value.limited; repositoriesLoaded = true
+        } catch { if !Task.isCancelled { diffError = error.localizedDescription } }
+    }
+    func clearChanges() { changesGeneration += 1; changes = nil; diffLoading = false }
+    func open(_ relativePath: String, diffSource: String? = nil, repository: String = "") async {
         documentGeneration += 1; let token = documentGeneration
         opening = relativePath; openError = ""
         defer { if token == documentGeneration { opening = nil } }
         do {
             let value: WorkspaceDocument
             if let source = diffSource {
-                let patch: WorkspacePatch = try await api.request(path("patch"), query: ["host": session.host, "path": relativePath, "source": source])
+                let patch: WorkspacePatch = try await api.request(path("patch"), query: ["host": session.host, "path": relativePath, "source": source, "repository": repository])
                 value = WorkspaceDocument(path: relativePath, text: patch.text, isDiff: true,
                                           notice: patch.text.isEmpty ? "此文件当前没有文本差异，请刷新差异列表。" : "")
             } else {
@@ -139,24 +168,45 @@ struct NativeWorkspaceBrowser: View {
     @State private var directory = ""
     @State private var query = ""
     @State private var source = "unstaged"
+    @State private var repository = ""
+    @State private var sort = "name"
+    @State private var descending = false
+    @State private var showHidden = false
+    @State private var importFile = false
+    @Environment(\.scenePhase) private var phase
     init(api: NativeAPI, session: LinkSession, canEdit: Bool = false, onInsert: @escaping (String) -> Void) {
         _model = StateObject(wrappedValue: NativeWorkspaceBrowserModel(api: api, session: session)); self.onInsert = onInsert; self.canEdit = canEdit
     }
-    private var requestKey: String { [tab, directory, query, source].joined(separator: "\n") }
+    private var requestKey: String { [tab, directory, query, source, repository, sort, String(descending), String(showHidden)].joined(separator: "\n") }
     var body: some View {
         NavigationStack {
             browserContent
             .navigationTitle("工作区").navigationBarTitleDisplayMode(.inline)
             .toolbar { browserToolbar }
             .task(id: requestKey) { await refresh() }
+            .task(id: "\(tab)|\(phase)|\(repository)|\(source)|\(model.document == nil)") {
+                guard tab == "changes", phase == .active, model.document == nil else { return }
+                while !Task.isCancelled {
+                    do { try await Task.sleep(nanoseconds: 5_000_000_000); try Task.checkCancellation() }
+                    catch { return }
+                    if !model.diffLoading { await refresh() }
+                }
+            }
             .navigationDestination(isPresented: Binding(get: { model.document != nil }, set: { if !$0 { model.document = nil } })) { documentDestination }
             .alert("无法打开文件", isPresented: Binding(get: { !model.openError.isEmpty }, set: { if !$0 { model.openError = "" } })) {
                 Button("好", role: .cancel) {}
             } message: { Text(model.openError) }
+            .fileImporter(isPresented: $importFile, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+                switch result {
+                case .success(let urls): Task { await importFiles(urls) }
+                case .failure(let error): model.openError = error.localizedDescription
+                }
+            }
         }
     }
     private var browserContent: some View {
         VStack(spacing: 0) {
+            if tab == "files" { fileHeader }
             Picker("工作区视图", selection: $tab) { Text("文件").tag("files"); Text("变更").tag("changes") }
                 .pickerStyle(.segmented).padding(.horizontal, 16).padding(.vertical, 10).accessibilityIdentifier("native.workspace.tabs")
             if tab == "files" { fileList } else { changeList }
@@ -164,7 +214,46 @@ struct NativeWorkspaceBrowser: View {
     }
     @ToolbarContentBuilder private var browserToolbar: some ToolbarContent {
         ToolbarItem(placement: .cancellationAction) { Button("完成") { dismiss() } }
-        ToolbarItem(placement: .primaryAction) { Button { Task { await refresh() } } label: { Image(systemName: "arrow.clockwise") }.accessibilityLabel("刷新工作区") }
+        ToolbarItem(placement: .primaryAction) {
+            if tab == "files" { fileMenu }
+        }
+    }
+    private var fileMenu: some View {
+        Menu {
+            Button("刷新", systemImage: "arrow.clockwise") { Task { await refresh() } }
+            Button("返回上一级", systemImage: "arrow.up") { goToParent() }.disabled(directory.isEmpty || !query.isEmpty)
+            Button("导入文件", systemImage: "square.and.arrow.down") { importFile = true }
+            Menu("排序") {
+                Picker("排序方式", selection: $sort) {
+                    Text("名称").tag("name"); Text("修改日期").tag("modified"); Text("创建日期").tag("created")
+                    Text("大小").tag("size"); Text("类型").tag("type")
+                }
+                Button(descending ? "升序" : "降序", systemImage: descending ? "arrow.up" : "arrow.down") { descending.toggle() }
+            }
+            Toggle("显示隐藏文件/目录", isOn: $showHidden)
+        } label: { Image(systemName: "ellipsis").frame(width: 36, height: 36).contentShape(Rectangle()) }
+            .accessibilityLabel("文件浏览选项").accessibilityIdentifier("native.workspace.fileMenu")
+    }
+    private var fileHeader: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityIdentifier("native.workspace.search.icon")
+                TextField("搜索文件和文件夹", text: $query).textInputAutocapitalization(.never).autocorrectionDisabled().accessibilityIdentifier("native.workspace.search")
+                if !query.isEmpty { Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }.accessibilityLabel("清除搜索") }
+            }
+            .padding(.horizontal, 12).frame(height: 42).background(Color.linkSurface, in: RoundedRectangle(cornerRadius: 8))
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 5) {
+                    Button("工作区") { directory = ""; query = "" }
+                    ForEach(Array(directory.split(separator: "/").enumerated()), id: \.offset) { index, part in
+                        Image(systemName: "chevron.right").font(.system(size: 9)).foregroundStyle(.tertiary)
+                        Button(String(part)) { directory = directory.split(separator: "/").prefix(index + 1).joined(separator: "/"); query = "" }
+                            .lineLimit(1).accessibilityIdentifier("native.workspace.breadcrumb.\(index)")
+                    }
+                    if !query.isEmpty { Image(systemName: "chevron.right").font(.system(size: 9)).foregroundStyle(.tertiary); Text("搜索结果").foregroundStyle(.secondary) }
+                }.font(.caption).buttonStyle(.plain)
+            }
+        }.padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 4)
     }
     @ViewBuilder private var documentDestination: some View {
         if let document = model.document {
@@ -176,15 +265,8 @@ struct NativeWorkspaceBrowser: View {
     private var fileList: some View {
         List {
             Section {
-                TextField("搜索文件名或相对路径", text: $query).textInputAutocapitalization(.never).autocorrectionDisabled().accessibilityIdentifier("native.workspace.search")
-                if !directory.isEmpty && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Button { directory = directory.split(separator: "/").dropLast().joined(separator: "/") } label: { Label("上一级", systemImage: "arrow.up") }
-                }
-                Text(query.isEmpty ? directory.isEmpty ? "工作区根目录" : directory : "在整个工作区中搜索").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-            }
-            Section {
                 if !model.error.isEmpty { errorRow(model.error) }
-                ForEach(model.entries) { entry in
+                ForEach(visibleEntries) { entry in
                     Button {
                         if entry.kind == "directory" { directory = entry.path; query = "" }
                         else if entry.kind == "file" { Task { await model.open(entry.path) } }
@@ -207,25 +289,33 @@ struct NativeWorkspaceBrowser: View {
                 }
                 if model.loading { ProgressView().frame(maxWidth: .infinity) }
                 else if model.entries.isEmpty && model.error.isEmpty { Text(query.isEmpty ? "此目录为空" : "没有匹配的文件").foregroundStyle(.secondary) }
-                if model.hasMore { Button("加载更多文件") { Task { await model.loadFiles(directory: directory, query: query, more: true) } }.disabled(model.loading) }
+                if model.hasMore { Button("加载更多文件") { Task { await model.loadFiles(directory: directory, query: query, sort: sort, descending: descending, includeHidden: showHidden, more: true) } }.disabled(model.loading) }
                 if model.limited { Text("已达到搜索或目录扫描上限，请缩小范围。").font(.caption).foregroundStyle(.secondary) }
             }
             if !model.root.isEmpty { Section { Text(model.root).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) } }
-        }.listStyle(.insetGrouped).refreshable { await refresh() }
+        }.listStyle(.plain).refreshable { await refresh() }
     }
     private var changeList: some View {
         List {
             Section {
+                if !model.repositories.isEmpty {
+                    Picker("Git 仓库", selection: $repository) {
+                        ForEach(model.repositories) { row in Text(row.name).tag(row.path) }
+                    }.accessibilityIdentifier("native.workspace.repository")
+                } else if model.repositoriesLoaded {
+                    Text("项目根目录及三级子目录中未发现 Git 仓库").font(.caption).foregroundStyle(.secondary)
+                }
+                if model.repositoryLimited { Text("仓库扫描已达到上限，可缩小项目范围后重试。").font(.caption).foregroundStyle(.secondary) }
                 Picker("差异来源", selection: $source) { Text("未暂存").tag("unstaged"); Text("已暂存").tag("staged") }.pickerStyle(.segmented)
                 if let changes = model.changes {
-                    HStack { Text("\(changes.fileCount) 个文件"); Spacer(); Text("+\(changes.added)").foregroundStyle(.green); Text("−\(changes.removed)").foregroundStyle(.red) }.font(.subheadline)
+                    HStack { Text("\(changes.fileCount) 个文件"); Spacer(); NativeDiffStatsLabel(added: changes.added, removed: changes.removed) }.font(.subheadline)
                 }
             }
             Section {
                 if !model.diffError.isEmpty { errorRow(model.diffError) }
                 if model.diffLoading { ProgressView().frame(maxWidth: .infinity) }
                 ForEach(model.changes?.files ?? []) { file in
-                    Button { Task { await model.open(file.path, diffSource: file.untracked ? nil : source) } } label: {
+                    Button { Task { await model.open(file.path, diffSource: file.untracked ? nil : source, repository: model.changes?.repository ?? "") } } label: {
                         HStack(alignment: .top) {
                             Image(systemName: file.untracked ? "doc.badge.plus" : "doc.text.magnifyingglass").foregroundStyle(.secondary)
                             VStack(alignment: .leading, spacing: 4) {
@@ -235,7 +325,7 @@ struct NativeWorkspaceBrowser: View {
                             }
                             Spacer()
                             if model.opening == file.path { ProgressView() }
-                            else if let added = file.added, let removed = file.removed { Text("+\(added) −\(removed)").font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
+                            else if let added = file.added, let removed = file.removed { NativeDiffStatsLabel(added: added, removed: removed).font(.caption).accessibilityIdentifier("native.workspace.change.\(file.path).stats") }
                         }
                     }.accessibilityIdentifier("native.workspace.change.\(file.path)")
                 }
@@ -250,9 +340,48 @@ struct NativeWorkspaceBrowser: View {
         VStack(alignment: .leading, spacing: 8) { NativeNotice(text: error, isError: true); Button("重试") { Task { await refresh() } } }
     }
     private func insertPath(_ path: String) { onInsert(path); dismiss() }
+    private var visibleEntries: [WorkspaceEntry] {
+        guard !query.isEmpty else { return model.entries }
+        let ordered = model.entries.sorted { left, right in
+            switch sort {
+            case "modified": return descending ? (left.modified ?? 0) > (right.modified ?? 0) : (left.modified ?? 0) < (right.modified ?? 0)
+            case "created": return descending ? (left.created ?? 0) > (right.created ?? 0) : (left.created ?? 0) < (right.created ?? 0)
+            case "size": return descending ? (left.bytes ?? 0) > (right.bytes ?? 0) : (left.bytes ?? 0) < (right.bytes ?? 0)
+            case "type":
+                let result = (left.type ?? "").localizedCaseInsensitiveCompare(right.type ?? "")
+                if result != .orderedSame { return descending ? result == .orderedDescending : result == .orderedAscending }
+            default:
+                let result = left.name.localizedCaseInsensitiveCompare(right.name)
+                if result != .orderedSame { return descending ? result == .orderedDescending : result == .orderedAscending }
+            }
+            return left.name.localizedCaseInsensitiveCompare(right.name) == .orderedAscending
+        }
+        return ordered
+    }
+    private func goToParent() { directory = directory.split(separator: "/").dropLast().joined(separator: "/"); query = "" }
+    private func importFiles(_ urls: [URL]) async {
+        do {
+            for url in urls {
+                let access = url.startAccessingSecurityScopedResource(); defer { if access { url.stopAccessingSecurityScopedResource() } }
+                let data = try Data(contentsOf: url)
+                guard data.count <= 20 * 1024 * 1024 else { throw LinkError.message("单个文件不能超过 20 MiB") }
+                _ = try await model.api.upload("/api/native/v1/threads/\(model.session.id)/workspace/import", query: ["host": model.session.host, "directory": directory, "name": url.lastPathComponent], data: data)
+            }
+            await model.loadFiles(directory: directory, query: query, sort: sort, descending: descending, includeHidden: showHidden)
+        } catch { model.openError = error.localizedDescription }
+    }
     private func refresh() async {
-        if tab == "files" { await model.loadFiles(directory: directory, query: query) }
-        else { await model.loadChanges(source: source) }
+        if tab == "files" { await model.loadFiles(directory: directory, query: query, sort: sort, descending: descending, includeHidden: showHidden) }
+        else {
+            await model.loadRepositories()
+            guard !Task.isCancelled else { return }
+            if model.repositoriesLoaded && !model.repositories.contains(where: { $0.path == repository }) {
+                repository = model.repositories.first?.path ?? ""
+                if !model.repositories.isEmpty { return }
+            }
+            if model.repositoriesLoaded && model.repositories.isEmpty { model.clearChanges(); return }
+            await model.loadChanges(source: source, repository: repository)
+        }
     }
 }
 

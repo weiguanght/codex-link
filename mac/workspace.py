@@ -112,8 +112,18 @@ class Workspace:
         return self.project(key)
 
     def preferences(self, keys, changes):
-        if not changes or set(changes) - {'pinned', 'hidden'} or any(type(v) is not bool for v in changes.values()):
+        allowed = {'pinned', 'hidden', 'unread', 'projectKey'}
+        if not changes or set(changes) - allowed or any(
+                type(v) is not bool for k, v in changes.items() if k != 'projectKey'):
             raise ValueError('会话列表选项无效')
+        if 'projectKey' in changes:
+            project_key = changes['projectKey']
+            if project_key is not None and (not isinstance(project_key, str) or not any(p['key'] == project_key for p in self.projects(True))):
+                raise ValueError('请选择现有项目')
+            if project_key is not None:
+                project_host = self.project(project_key)['host']
+                if any(key.split('|', 1)[0] != project_host for key in keys):
+                    raise ValueError('不能将会话分配到其他主机的项目')
         with self.lock:
             data = self.snapshot()
             for key in keys:
@@ -131,19 +141,36 @@ class Workspace:
             if project:
                 row.update(projectKey=project['key'], projectName=project['name'])
             prefs = data['sessionPrefs'].get(row['host'] + '|' + row['id'], {})
-            row.update(pinned=prefs.get('pinned', False), hidden=prefs.get('hidden', False))
+            row.update(pinned=prefs.get('pinned', False), hidden=prefs.get('hidden', False),
+                       unread=prefs.get('unread', False))
+            assigned_key = prefs.get('projectKey')
+            if assigned_key:
+                project = by_key.get(assigned_key)
+                if project and project['host'] == row['host']:
+                    row.update(projectKey=project['key'], projectName=project['name'])
         return rows
 
-    def browse(self, path=None, offset=0, query=''):
+    def browse(self, path=None, offset=0, query='', sort='name', descending=False, include_hidden=False):
         path = directory(path or str(Path.home()))
+        if sort not in ('name', 'modified', 'created', 'size', 'type'):
+            raise ValueError('排序方式无效')
         rows = []
         with os.scandir(path) as entries:
             for entry in entries:
-                if not entry.name.startswith('.') and query.casefold() in entry.name.casefold() and entry.is_dir(follow_symlinks=False):
-                    rows.append({'name': entry.name, 'path': str(path / entry.name)})
-        rows.sort(key=lambda r: r['name'].casefold())
+                try:
+                    info = entry.stat(follow_symlinks=False)
+                    if (include_hidden or not entry.name.startswith('.')) and query.casefold() in entry.name.casefold() and stat.S_ISDIR(info.st_mode):
+                        rows.append({'name': entry.name, 'path': str(path / entry.name),
+                                     'modified': info.st_mtime, 'created': getattr(info, 'st_birthtime', info.st_ctime),
+                                     'bytes': info.st_size, 'type': '文件夹'})
+                except FileNotFoundError:
+                    continue
+        key = {'name': lambda r: r['name'].casefold(), 'modified': lambda r: r['modified'],
+               'created': lambda r: r['created'], 'size': lambda r: r['bytes'], 'type': lambda r: r['type']}[sort]
+        rows.sort(key=lambda r: (key(r), r['name'].casefold()), reverse=descending)
         return {'path': str(path), 'parent': str(path.parent) if path != path.parent else None,
-                'directories': rows[offset:offset + 100], 'hasMore': offset + 100 < len(rows)}
+                'directories': rows[offset:offset + 100], 'hasMore': offset + 100 < len(rows),
+                'sort': sort, 'descending': bool(descending), 'includeHidden': bool(include_hidden)}
 
     def agents(self, key):
         project = self.project(key)

@@ -7,6 +7,8 @@ from bridge.accounts import operation
 from bridge.model import ordered_turns, async_requests
 from bridge.account import AccountError
 from bridge.ipc import IPCError
+from .session_delete import permanently_delete
+from bridge.service import LiveSession
 
 
 @operation
@@ -25,6 +27,39 @@ def archive(bridge, key, archived):
     return result
 
 
+@operation
+def delete_conversation(bridge, key, backup_root, read_only=False):
+    if not read_only:
+        bridge.store.get(key)
+        session = bridge.session(key, attach=False, background=True)
+    else:
+        # The HTTP caller has resolved this exact local ID through the history
+        # catalog. Never activate a read-only session just to delete its files.
+        with bridge.lock:
+            session = bridge.live.get(key) or LiveSession(key)
+    with session.action_lock:
+        with bridge.lock:
+            queued = any(k.startswith(key + ':') and v.get('status') in ('queued', 'unknown')
+                         for k, v in getattr(bridge, 'submissions', {}).items())
+            pending_goal = any(k.startswith(key + ':') and v.get('state') in ('pending', 'sent', 'unknown')
+                               for k, v in getattr(bridge, 'goal_commands', {}).items())
+            uncertain_action = any(v.get('source') == key and v.get('status') == 'unknown'
+                                   for v in getattr(bridge, 'message_actions', {}).values())
+        with session.condition:
+            state = session.state or {}
+            active = session.activating or session.connecting or session.discovering or session.viewers > 0
+            running = any(t.get('status') == 'inProgress' for t in ordered_turns(state))
+            requests = state.get('requests') or async_requests(state)
+            runtime_active = state.get('threadRuntimeStatus', {}).get('type') == 'active'
+        if active or running or requests or queued or pending_goal or uncertain_action or runtime_active:
+            raise ValueError('会话正在查看、执行或有待确认的操作，请先结束任务并关闭手机详情后再永久删除')
+        result = permanently_delete(bridge.codex_home, backup_root, key, confirmed=True)
+        with bridge.lock:
+            bridge.live.pop(key, None)
+            bridge.listed.discard(key)
+        return result
+
+
 def handle(handler, write, path):
     workspace = handler.server.workspace
     library = handler.server.reading
@@ -39,10 +74,11 @@ def handle(handler, write, path):
         if not write and path == '/api/projects':
             result = {'projects': workspace.projects()}
         elif not write and path == '/api/workspace/directories':
-            result = workspace.browse(value('path') or None, max(0, int(value('offset', '0'))), value('q')[:200])
+            result = workspace.browse(value('path') or None, max(0, int(value('offset', '0'))), value('q')[:200],
+                                      value('sort', 'name'), value('descending') == 'true', value('hidden') == 'true')
         elif not write and path == '/api/workspace/agents':
             result = workspace.agents(value('project'))
-        elif write and path in ('/api/workspace/projects', '/api/workspace/preferences', '/api/workspace/archive'):
+        elif write and path in ('/api/workspace/projects', '/api/workspace/preferences', '/api/workspace/archive', '/api/workspace/delete'):
             body = handler.read_json()
             if not isinstance(body, dict):
                 raise ValueError('请求格式无效')
@@ -63,6 +99,14 @@ def handle(handler, write, path):
                     keys.append(row['host'] + '|' + row['id'])
                 workspace.preferences(keys, body.get('changes', {}))
                 result = {'ok': True, 'count': len(keys)}
+            elif path.endswith('/delete'):
+                if body.get('confirmed') is not True:
+                    raise PermissionError('永久删除需要显式确认')
+                row = library.metadata(body.get('id'), body.get('host', 'local'))
+                if row['host'] != 'local':
+                    raise PermissionError('仅支持永久删除本机会话')
+                result = delete_conversation(library.bridge, row['id'], library.bridge.data_dir / 'deletion-backups', read_only=bool(row.get('readOnly')))
+                library.catalog.expires = 0
             else:
                 if body.get('confirmed') is not True or type(body.get('archived')) is not bool:
                     raise ValueError('请确认归档／取消归档操作')

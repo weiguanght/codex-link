@@ -78,6 +78,10 @@ final class NativeSmoke: ObservableObject {
         try require(diff.files.count == 2 && diff.files[0].path == "Sources/中文 文件.swift", "Flattened desktop file sections were lost")
         try require(diff.files[0].additions == 2 && diff.files[0].deletions == 1, "Diff stats are incorrect")
         try require(diff.files[0].lines[1].old == 10 && diff.files[0].lines[2].new == 20 && diff.files[0].lines[3].old == 11, "Hunk line positions are incorrect")
+        let shared = NativeDiffDocument("/workspace/project/Sources/main.swift\n@@ -1 +1 @@\n-old\n+new\n\n/workspace/project/Tests/main.swift\n@@ -1 +1 @@\n-before\n+after")
+        try require(shared.commonDirectory == "/workspace/project/", "Diff common directory is incorrect")
+        try require(NativeDiffDocument("Sources/main.swift\n@@ -1 +1 @@\n-old\n+new").commonDirectory == "Sources/", "Single-file directory did not collapse")
+        try require(diff.commonDirectory.isEmpty, "Unrelated paths gained an incorrect common prefix")
         let prefixes = NativeDiffDocument("--- a/test.txt\n+++ b/test.txt\n@@ -1 +1 @@\n---deleted\n+++added")
         try require(prefixes.files.count == 1 && prefixes.files[0].additions == 1 && prefixes.files[0].deletions == 1, "Code prefixes became file headers")
         let patch = NativeDiffDocument("*** Begin Patch\n*** Add File: new.py\n+print(1)\n*** Update File: old.py\n*** Move to: renamed.py\n@@\n-old\n+new\n*** End Patch")
@@ -95,6 +99,90 @@ final class NativeSmoke: ObservableObject {
         try require(presentation.input == command && presentation.output == "result", "Unicode/multiline command was split into output")
         let highlighted = NativeSyntaxHighlight.text("let value = 42", language: "swift")
         try require(String(highlighted.characters) == "let value = 42" && highlighted.runs.count > 1, "Syntax highlighting lost source or colors")
+    }
+    private func verifyMessageContent() throws {
+        try require(!NativeBackNavigation.shouldFinish(progress: 0.37, velocity: 0), "Short back swipe must cancel")
+        try require(NativeBackNavigation.shouldFinish(progress: 0.38, velocity: 0), "38 percent back swipe must finish")
+        try require(NativeBackNavigation.shouldFinish(progress: 0.1, velocity: 900), "Right fling must finish")
+        try require(!NativeBackNavigation.shouldFinish(progress: 0.1, velocity: -900), "Left fling must not finish")
+        let rows = ["| 文件 | 状态 | 数量 |", "| :--- | :---: | ---: |", "| **代码** | 已完成 | 12 |", "| a\\|b | `left|right` | 3 |", ""]
+        let table = NativeMarkdownTable.parse(rows, at: 0)?.table
+        try require(table?.headers == ["文件", "状态", "数量"], "Markdown table headers were lost")
+        try require(table?.alignments == [.leading, .center, .trailing], "Markdown table alignment failed")
+        try require(table?.rows[1] == ["a\\|b", "`left|right`", "3"], "Escaped or inline-code pipes split a cell")
+        let missing = NativeMarkdownTable.parse(["A | B", "--- | ---", "only |", "too | many | ignored"], at: 0)?.table
+        try require(missing?.rows == [["only", ""], ["too", "many"]], "Ragged table rows were not normalized")
+        try require(NativeMarkdownTable.parse(["a|b", "not|separator"], at: 0) == nil, "Plain pipes became a table")
+        let fenced = NativeMarkdownBlock.parse("````text\n" + rows.joined(separator: "\n") + "\n```\n````\n" + rows.joined(separator: "\n"))
+        try require(fenced.filter { $0.table != nil }.count == 1 && fenced.first?.code == true && fenced.first?.content.contains("```") == true, "Tables leaked out of fenced code")
+        try require(NativeHistoryPull.shouldPrefetch(firstVisibleIndex: 8, movingOlder: true), "Near-top user scroll must prefetch")
+        try require(!NativeHistoryPull.shouldPrefetch(firstVisibleIndex: 9, movingOlder: true), "Distant scroll must not prefetch")
+        try require(!NativeHistoryPull.shouldPrefetch(firstVisibleIndex: 2, movingOlder: false), "Passive changes must not prefetch")
+        try require(abs(NativeHistoryPull.damped(100) - 40) < 0.01, "History pull must damp 100pt to 40pt")
+        try require(NativeHistoryPull.damped(0) == 0, "History pull idle distance must be zero")
+        // Real UIKit geometry: prepend twenty unequal-height messages and verify
+        // both exact contentOffset compensation and the original message's pixels.
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 600))
+        let host = UIViewController(); window.rootViewController = host
+        let scroll = UIScrollView(frame: window.bounds)
+        scroll.contentInsetAdjustmentBehavior = .never
+        host.view.addSubview(scroll); window.isHidden = false
+        defer { window.isHidden = true }
+        let controller = NativeHistoryScrollController()
+        let keys = (0..<50).map { "anchor-\($0)" }
+        controller.configure(identity: "synthetic-anchor", enabled: false, keys: keys, onLoad: {}, onDragging: { _ in })
+        let probe = UIView(frame: .zero); scroll.addSubview(probe); controller.attach(probe)
+        let markers = keys.enumerated().map { index, key -> UIView in
+            let row = UIView(frame: CGRect(x: 0, y: index * 80, width: 320, height: 80))
+            scroll.addSubview(row); controller.register(key, view: row); return row
+        }
+        scroll.contentSize = CGSize(width: 320, height: 4000)
+        // The response arrives after the reader has already moved further up.
+        scroll.contentOffset.y = 1073
+        controller.captureAnchor()
+        let visible = markers[13]
+        let originalY = visible.convert(visible.bounds, to: window).minY
+        let insertedHeight = (0..<20).reduce(CGFloat(0)) { $0 + CGFloat(47 + $1 * 3) }
+        for marker in markers { marker.frame.origin.y += insertedHeight }
+        scroll.contentSize.height += insertedHeight
+        controller.finish()
+        try require(abs(scroll.contentOffset.y - (1073 + insertedHeight)) < 0.25, "Prepending history did not compensate the exact inserted height")
+        try require(abs(visible.convert(visible.bounds, to: window).minY - originalY) < 0.25, "History prepend moved the visible message in screen pixels")
+        // A second lazy-layout correction must preserve that same viewport too.
+        for marker in markers { marker.frame.origin.y += 37 }
+        scroll.contentSize.height += 37; controller.finish()
+        try require(abs(visible.convert(visible.bounds, to: window).minY - originalY) < 0.25, "Late row measurement moved the history anchor")
+        controller.releaseAnchor(); controller.detach()
+        let context = NativeContextUsage(json(["usedTokens": .number(24000), "windowTokens": .number(128000)]))
+        try require(context?.placeholder == "24K / 128K（18.8%）", "Context placeholder counts or percentage are wrong")
+        let selectableMessage = SelectableMessageTextView()
+        selectableMessage.text = "select only to copy"
+        try require(!selectableMessage.isEditable, "Message text must not be editable")
+        try require(selectableMessage.isSelectable, "Message text must support native selection")
+        try require(selectableMessage.canPerformAction(#selector(UIResponder.copy(_:)), withSender: nil), "Message text must allow copying")
+        try require(!selectableMessage.canPerformAction(#selector(UIResponder.paste(_:)), withSender: nil), "Message text must reject pasting")
+        for (count, expected) in [(999, "999"), (1000, "1K"), (13679, "13.7K"), (999500, "1M"), (1250000, "1.25M")] {
+            try require(NativeTokenCount.format(count) == expected, "Compact Token formatting failed for \(count)")
+        }
+        try require(NativeContextUsage(.null) == nil, "Missing context must not show a fabricated zero")
+        try require(NativeContextUsage(json(["usedTokens": .number(1), "windowTokens": .number(0)])) == nil, "Zero context window must be unavailable")
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let text = folder.appendingPathComponent("preview.swift")
+        try Data("let value = 42\n".utf8).write(to: text)
+        guard case .text(let content, let truncated)? = try NativePreviewContent.read(text) else { throw LinkError.message("Source file did not route to text preview") }
+        try require(content == "let value = 42\n" && !truncated, "Text preview changed content")
+        let utf16 = folder.appendingPathComponent("unicode.txt")
+        try "中文预览".data(using: .utf16)!.write(to: utf16)
+        guard case .text(let unicode, _)? = try NativePreviewContent.read(utf16), unicode == "中文预览" else { throw LinkError.message("UTF-16 preview failed") }
+        let binary = folder.appendingPathComponent("package.zip")
+        try Data("Synthetic zip contents".utf8).write(to: binary)
+        try require(try NativePreviewContent.read(binary) == nil, "Archive was mistaken for text")
+        let image = folder.appendingPathComponent("image.png")
+        let data = UIGraphicsImageRenderer(size: CGSize(width: 10, height: 10)).pngData { ctx in UIColor.blue.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 10, height: 10)) }
+        try data.write(to: image)
+        guard case .image? = try NativePreviewContent.read(image) else { throw LinkError.message("Image did not route to preview") }
     }
     func run() async {
         guard result == "Testing…" else { return }
@@ -124,6 +212,8 @@ final class NativeSmoke: ObservableObject {
             try require(workspace.sessions.count >= 2, "Native session decoding failed: " + workspace.error)
             try require(!workspace.projects.isEmpty, "Native project index missing")
             try verifyToolRendering()
+            try verifyMessageContent()
+            checks.append("silent prefetch direction/8-row boundary + damped pull + 20-row pixel anchor/late layout + GFM tables/escaped pipes/code fences + image/text/UTF-16/archive preview routing")
             checks.append("structured multi-file diff parsing + line counts + Unicode command/output split + syntax highlighting")
             // XCTest uses the same live fixture after the full smoke pass.
             // Bootstrap its UI without rerunning mutations or fixed send-count assertions.
@@ -165,7 +255,7 @@ final class NativeSmoke: ObservableObject {
                 try require(external.runs.contains { $0.link?.absoluteString == "https://example.com" }, "External link changed")
                 let code = "`[文件](/tmp/code.txt)`"
                 try require(String(NativeMessageLinks.attributed(code).characters) == "[文件](/tmp/code.txt)", "Inline code destination was rewritten")
-                guard let artifact = testing.files.first, let artifactURL = NativeMessageLinks.url(reference: artifact["reference"].string) else { throw LinkError.message("Synthetic artifact missing") }
+                guard let artifact = testing.files.first(where: { $0["name"].string.hasSuffix(".ipa") }), let artifactURL = NativeMessageLinks.url(reference: artifact["reference"].string) else { throw LinkError.message("Synthetic artifact missing") }
                 try require(NativeMessageLinks.file(for: artifactURL, files: testing.files) == artifact, "Real timeline reference did not resolve")
                 let downloaded = try await api.download("/api/sessions/\(desktop.id)/files/\(artifact["id"].string)", query: ["host": desktop.host], name: artifact["name"].string)
                 defer { try? FileManager.default.removeItem(at: downloaded.deletingLastPathComponent()) }
@@ -178,7 +268,22 @@ final class NativeSmoke: ObservableObject {
                 try require(restrictedEfforts.values == ["minimal", "high"] && restrictedEfforts.selection("low") == "high", "Model switch ignored supported efforts or default")
                 try require(restrictedEfforts.selection("high") == "high" && NativeModelEfforts(catalog: .null, model: "custom").values.contains("xhigh"), "Reasoning effort fallback failed")
                 checks.append("model reasoning options + preserve compatible selection + model default + unavailable catalog fallback")
+                guard let fileChange = testing.rows.first(where: { $0.kind == "fileChange" }) else { throw LinkError.message("File change fixture missing") }
+                async let firstStats: Void = testing.loadFileChangeStats(fileChange)
+                async let secondStats: Void = testing.loadFileChangeStats(fileChange)
+                _ = await (firstStats, secondStats)
+                try require(testing.fileChangeStats(fileChange)?.added == 2 && testing.fileChangeStats(fileChange)?.removed == 2, "Full tool diff stats missing or incorrect")
+                try require(!testing.rowHasMore(fileChange), "Tool stats used a partial patch")
+                checks.append("full paginated file-change stats + shared detail loading")
                 let browser = NativeWorkspaceBrowserModel(api: api, session: desktop)
+                await browser.loadRepositories()
+                try require(browser.repositories.map(\.path) == ["", "apps/client", "apps/tools/worker"], "Nested repository discovery failed")
+                await browser.loadChanges(source: "unstaged", repository: "apps/tools/worker")
+                try require(browser.changes?.files.first?.path == "apps/tools/worker/tracked.txt", "Selected repository change paths lost workspace scope")
+                await browser.open("apps/tools/worker/tracked.txt", diffSource: "unstaged", repository: "apps/tools/worker")
+                try require(browser.document?.text.contains("+working nested") == true, "Selected repository patch mixed repositories")
+                browser.document = nil
+                checks.append("nested Git discovery + selected-repository changes + patch")
                 await browser.loadFiles(directory: "", query: "")
                 try require(browser.error.isEmpty && browser.entries.contains { $0.path == "Sources" }, "Workspace root listing failed")
                 await browser.loadFiles(directory: "Sources", query: "")
@@ -270,6 +375,15 @@ final class NativeSmoke: ObservableObject {
                 try require(try reopenedStore.load(scope: "synthetic-pairing", identity: desktop.identity) == nil, "Confirmed send left a recoverable draft")
                 let after = try await api.value("/api/sessions/\(desktop.id)/catalog")
                 try require(after["sendCount"].int == 2 && after["lastAttemptCount"].int == 2, "Retry changed idempotency key")
+                resumed.draft.sendMode = "send"
+                resumed.draft.text = "Synthetic one-off queued message"
+                await resumed.send(mode: "queue")
+                let overrideMode = try await api.value("/api/sessions/\(desktop.id)/catalog")
+                try require(overrideMode["lastSendMode"].string == "queue" && resumed.draft.sendMode == "send", "One-off send changed the default or ignored the chosen mode")
+                resumed.draft.text = "Synthetic default send after override"
+                await resumed.send()
+                let defaultMode = try await api.value("/api/sessions/\(desktop.id)/catalog")
+                try require(defaultMode["lastSendMode"].string == "send", "Single tap did not restore default send mode")
                 try await resumed.stop()
                 if let request = resumed.requests.first { try await resumed.respond(request, response: json(["decision": string("decline")])) }
                 resumed.draft.text = "Forget while a save is pending"
@@ -279,6 +393,40 @@ final class NativeSmoke: ObservableObject {
                 resumedTask.cancel()
                 checks.append("relaunch without replay + stable retry ID + acknowledged cleanup + forget cancels save")
                 checks.append("native send + uncertain retry ID + stop + approval response")
+            }
+            if let desktop = workspace.sessions.first(where: { $0.readOnly != true }) {
+                try await workspace.preferences([desktop], changes: ["pinned": .bool(true), "unread": .bool(true)])
+                let unread = workspace.sessions.first { $0.identity == desktop.identity }!
+                try require(unread.unread == true && unread.pinned == true, "Session preferences did not persist")
+                workspace.selected = unread
+                for _ in 0..<30 {
+                    if workspace.sessions.first(where: { $0.identity == desktop.identity })?.unread == false { break }
+                    try await Task.sleep(nanoseconds: 50_000_000)
+                }
+                try require(workspace.sessions.first(where: { $0.identity == desktop.identity })?.unread == false, "Opening a session did not mark it read")
+                workspace.selected = nil
+                if let project = workspace.projects.first(where: { $0.registered == true }) {
+                    try await workspace.preferences([desktop], changes: ["projectKey": string(project.key)])
+                    try require(workspace.sessions.first(where: { $0.identity == desktop.identity })?.projectKey == project.key, "Project assignment did not persist")
+                    try await workspace.preferences([desktop], changes: ["projectKey": .null])
+                }
+                let markdown = try await workspace.copyMarkdown(desktop)
+                try require(markdown.contains("## 用户") && markdown.contains("## Codex") && markdown.contains("Synthetic output final page") && markdown.contains("new docs"), "Markdown export omitted full message/tool content")
+                let historyMarkdown = try await workspace.copyMarkdown(readOnly)
+                try require(historyMarkdown.contains("## 用户"), "Read-only Markdown export failed")
+                checks.append("pin + unread + mark read on open + project assignment/reset + full Markdown export")
+                try await workspace.fork(desktop)
+                guard let child = workspace.selected, child.id != desktop.id else { throw LinkError.message("Fork did not open the new conversation") }
+                workspace.selected = nil
+                try await workspace.archive(child)
+                var archivedChild = child; archivedChild.archived = true
+                try await workspace.archive(archivedChild)
+                try await workspace.permanentlyDelete(child)
+                var missing = false
+                do { let _: LinkSession = try await api.request("/api/session-meta/\(child.id)") } catch { missing = true }
+                try require(missing, "Deleted synthetic branch remains discoverable")
+                try require(workspace.sessions.contains(where: { $0.identity == desktop.identity }), "Deleting a branch removed its source")
+                checks.append("fork latest completed turn + open child + archive/unarchive + confirmed precise deletion")
             }
             let remote = PinnedAPI(base: v6, pin: pin); defer { remote.close() }
             try await remote.verify(serverId: serverId)

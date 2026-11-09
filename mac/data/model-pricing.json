@@ -1,0 +1,503 @@
+{
+  "source": "https://developers.openai.com/api/docs/pricing?latest-pricing-expanded=true",
+  "fetchSource": "https://r.jina.ai/https://developers.openai.com/api/docs/pricing?latest-pricing-expanded=true",
+  "checkedOn": "2026-11-09",
+  "sourceSHA256": "677164304c14a0076ebc1e60f1927700759cae62f0c4757f90630ff041ebf12d",
+  "unit": "USD per 1M tokens",
+  "contextPricing": "Published short-context table",
+  "models": {
+    "gpt-6-astra": {
+      "standard": {
+        "input": 10.0,
+        "output": 50.0,
+        "cachedInput": 1.0
+      },
+      "batch": {
+        "input": 5.0,
+        "output": 25.0,
+        "cachedInput": 0.5
+      },
+      "fast": {
+        "input": 20.0,
+        "output": 100.0,
+        "cachedInput": 2.0
+      },
+      "ultrafast": {
+        "input": 60.0,
+        "output": 300.0,
+        "cachedInput": 6.0
+      }
+    },
+    "gpt-6.1-sol": {
+      "standard": {
+        "input": 2.0,
+        "output": 10.0,
+        "cachedInput": 0.1
+      },
+      "batch": {
+        "input": 1.0,
+        "output": 5.0,
+        "cachedInput": 0.05
+      },
+      "fast": {
+        "input": 4.0,
+        "output": 20.0,
+        "cachedInput": 0.2
+      },
+      "ultrafast": {
+        "input": 12.0,
+        "output": 60.0,
+        "cachedInput": 0.6
+      }
+    },
+    "gpt-6.1-terra": {
+      "standard": {
+        "input": 1.0,
+        "output": 5.0,
+        "cachedInput": 0.05
+      },
+      "batch": {
+        "input": 0.5,
+        "output": 2.5,
+        "cachedInput": 0.025
+      },
+      "fast": {
+        "input": 2.0,
+        "output": 10.0,
+        "cachedInput": 0.1
+      }
+    },
+    "gpt-6-luna": {
+      "standard": {
+        "input": 0.1,
+        "output": 0.5,
+        "cachedInput": 0.01
+      },
+      "batch": {
+        "input": 0.05,
+        "output": 0.25,
+        "cachedInput": 0.005
+      },
+      "fast": {
+        "input": 0.2,
+        "output": 1.0,
+        "cachedInput": 0.02
+      }
+    },
+    "gpt-6-sol": {
+      "standard": {
+        "input": 2.0,
+        "output": 10.0,
+        "cachedInput": 0.2
+      },
+      "batch": {
+        "input": 1.0,
+        "output": 5.0,
+        "cachedInput": 0.1
+      },
+      "fast": {
+        "input": 4.0,
+        "output": 20.0,
+        "cachedInput": 0.4
+      }
+    },
+    "gpt-5.6-sol": {
+      "standard": {
+        "input": 4.0,
+        "output": 20.0,
+        "cachedInput": 0.4
+      },
+      "batch": {
+        "input": 2.0,
+        "output": 10.0,
+        "cachedInput": 0.2
+      },
+      "fast": {
+        "input": 8.0,
+        "output": 40.0,
+        "cachedInput": 0.8
+      }
+    },
+    "gpt-5.6-terra": {
+      "standard": {
+        "input": 2.0,
+        "output": 12.0,
+        "cachedInput": 0.2
+      },
+      "batch": {
+        "input": 1.0,
+        "output": 6.0,
+        "cachedInput": 0.1
+      },
+      "fast": {
+        "input": 4.0,
+        "output": 24.0,
+        "cachedInput": 0.4
+      }
+    },
+    "gpt-5.6-luna": {
+      "standard": {
+        "input": 0.2,
+        "output": 1.2,
+        "cachedInput": 0.02
+      },
+      "batch": {
+        "input": 0.1,
+        "output": 0.6,
+        "cachedInput": 0.01
+      },
+      "fast": {
+        "input": 0.4,
+        "output": 2.4,
+        "cachedInput": 0.04
+      }
+    },
+    "gpt-5.5": {
+      "standard": {
+        "input": 5.0,
+        "output": 30.0,
+        "cachedInput": 0.5
+      },
+      "batch": {
+        "input": 2.5,
+        "output": 15.0,
+        "cachedInput": 0.25
+      },
+      "fast": {
+        "input": 12.5,
+        "output": 75.0,
+        "cachedInput": 1.25
+      }
+    },
+    "gpt-5.5-pro": {
+      "standard": {
+        "input": 30.0,
+        "output": 180.0,
+        "cachedInput": null
+      },
+      "batch": {
+        "input": 15.0,
+        "output": 90.0,
+        "cachedInput": null
+      }
+    },
+    "gpt-5.4": {
+      "standard": {
+        "input": 2.5,
+        "output": 15.0,
+        "cachedInput": 0.25
+      },
+      "batch": {
+        "input": 1.25,
+        "output": 7.5,
+        "cachedInput": 0.13
+      },
+      "fast": {
+        "input": 5.0,
+        "output": 30.0,
+        "cachedInput": 0.5
+      }
+    },
+    "gpt-5.4-pro": {
+      "standard": {
+        "input": 30.0,
+        "output": 180.0,
+        "cachedInput": null
+      },
+      "batch": {
+        "input": 15.0,
+        "output": 90.0,
+        "cachedInput": null
+      }
+    },
+    "gpt-5.4-mini": {
+      "standard": {
+        "input": 0.75,
+        "output": 4.5,
+        "cachedInput": 0.075
+      },
+      "batch": {
+        "input": 0.375,
+        "output": 2.25,
+        "cachedInput": 0.0375
+      },
+      "flex": {
+        "input": 0.375,
+        "output": 2.25,
+        "cachedInput": 0.0375
+      },
+      "fast": {
+        "input": 1.5,
+        "output": 9.0,
+        "cachedInput": 0.15
+      }
+    },
+    "gpt-5.4-nano": {
+      "standard": {
+        "input": 0.2,
+        "output": 1.25,
+        "cachedInput": 0.02
+      },
+      "batch": {
+        "input": 0.1,
+        "output": 0.625,
+        "cachedInput": 0.01
+      },
+      "flex": {
+        "input": 0.1,
+        "output": 0.625,
+        "cachedInput": 0.01
+      }
+    },
+    "gpt-5.2": {
+      "standard": {
+        "input": 1.75,
+        "output": 14.0,
+        "cachedInput": 0.175
+      },
+      "batch": {
+        "input": 0.875,
+        "output": 7.0,
+        "cachedInput": 0.0875
+      },
+      "flex": {
+        "input": 0.875,
+        "output": 7.0,
+        "cachedInput": 0.0875
+      },
+      "fast": {
+        "input": 3.5,
+        "output": 28.0,
+        "cachedInput": 0.35
+      }
+    },
+    "gpt-5.2-pro": {
+      "standard": {
+        "input": 21.0,
+        "output": 168.0,
+        "cachedInput": null
+      },
+      "batch": {
+        "input": 10.5,
+        "output": 84.0,
+        "cachedInput": null
+      }
+    },
+    "gpt-5.1": {
+      "standard": {
+        "input": 1.25,
+        "output": 10.0,
+        "cachedInput": 0.125
+      },
+      "batch": {
+        "input": 0.625,
+        "output": 5.0,
+        "cachedInput": 0.0625
+      },
+      "flex": {
+        "input": 0.625,
+        "output": 5.0,
+        "cachedInput": 0.0625
+      },
+      "fast": {
+        "input": 2.5,
+        "output": 20.0,
+        "cachedInput": 0.25
+      }
+    },
+    "gpt-5": {
+      "standard": {
+        "input": 1.25,
+        "output": 10.0,
+        "cachedInput": 0.125
+      },
+      "batch": {
+        "input": 0.625,
+        "output": 5.0,
+        "cachedInput": 0.0625
+      },
+      "flex": {
+        "input": 0.625,
+        "output": 5.0,
+        "cachedInput": 0.0625
+      },
+      "fast": {
+        "input": 2.5,
+        "output": 20.0,
+        "cachedInput": 0.25
+      }
+    },
+    "gpt-5-mini": {
+      "standard": {
+        "input": 0.25,
+        "output": 2.0,
+        "cachedInput": 0.025
+      },
+      "batch": {
+        "input": 0.125,
+        "output": 1.0,
+        "cachedInput": 0.0125
+      },
+      "flex": {
+        "input": 0.125,
+        "output": 1.0,
+        "cachedInput": 0.0125
+      },
+      "fast": {
+        "input": 0.45,
+        "output": 3.6,
+        "cachedInput": 0.045
+      }
+    },
+    "gpt-5-nano": {
+      "standard": {
+        "input": 0.05,
+        "output": 0.4,
+        "cachedInput": 0.005
+      },
+      "batch": {
+        "input": 0.025,
+        "output": 0.2,
+        "cachedInput": 0.0025
+      },
+      "flex": {
+        "input": 0.025,
+        "output": 0.2,
+        "cachedInput": 0.0025
+      }
+    },
+    "gpt-5-pro": {
+      "standard": {
+        "input": 15.0,
+        "output": 120.0,
+        "cachedInput": null
+      },
+      "batch": {
+        "input": 7.5,
+        "output": 60.0,
+        "cachedInput": null
+      }
+    },
+    "gpt-4.1": {
+      "standard": {
+        "input": 2.0,
+        "output": 8.0,
+        "cachedInput": 0.5
+      },
+      "batch": {
+        "input": 1.0,
+        "output": 4.0,
+        "cachedInput": null
+      },
+      "fast": {
+        "input": 3.5,
+        "output": 14.0,
+        "cachedInput": 0.875
+      }
+    },
+    "gpt-4.1-mini": {
+      "standard": {
+        "input": 0.4,
+        "output": 1.6,
+        "cachedInput": 0.1
+      },
+      "batch": {
+        "input": 0.2,
+        "output": 0.8,
+        "cachedInput": null
+      },
+      "fast": {
+        "input": 0.7,
+        "output": 2.8,
+        "cachedInput": 0.175
+      }
+    },
+    "gpt-4o": {
+      "standard": {
+        "input": 2.5,
+        "output": 10.0,
+        "cachedInput": 1.25
+      },
+      "batch": {
+        "input": 1.25,
+        "output": 5.0,
+        "cachedInput": null
+      },
+      "fast": {
+        "input": 4.25,
+        "output": 17.0,
+        "cachedInput": 2.125
+      }
+    },
+    "gpt-4o-mini": {
+      "standard": {
+        "input": 0.15,
+        "output": 0.6,
+        "cachedInput": 0.075
+      },
+      "batch": {
+        "input": 0.075,
+        "output": 0.3,
+        "cachedInput": null
+      },
+      "fast": {
+        "input": 0.25,
+        "output": 1.0,
+        "cachedInput": 0.125
+      }
+    },
+    "o3": {
+      "standard": {
+        "input": 2.0,
+        "output": 8.0,
+        "cachedInput": 0.5
+      },
+      "batch": {
+        "input": 1.0,
+        "output": 4.0,
+        "cachedInput": null
+      },
+      "flex": {
+        "input": 1.0,
+        "output": 4.0,
+        "cachedInput": 0.25
+      },
+      "fast": {
+        "input": 3.5,
+        "output": 14.0,
+        "cachedInput": 0.875
+      }
+    },
+    "o3-pro": {
+      "standard": {
+        "input": 20.0,
+        "output": 80.0,
+        "cachedInput": null
+      },
+      "batch": {
+        "input": 10.0,
+        "output": 40.0,
+        "cachedInput": null
+      }
+    },
+    "chat-latest": {
+      "standard": {
+        "input": 5.0,
+        "output": 30.0,
+        "cachedInput": 0.5
+      }
+    },
+    "gpt-5.3-codex": {
+      "standard": {
+        "input": 1.75,
+        "output": 14.0,
+        "cachedInput": 0.175
+      },
+      "fast": {
+        "input": 3.5,
+        "output": 28.0,
+        "cachedInput": 0.35
+      }
+    }
+  }
+}

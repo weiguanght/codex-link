@@ -20,6 +20,28 @@ struct NativeIconButton: View {
         }.buttonStyle(.plain).accessibilityLabel(label)
     }
 }
+/// Shared row metrics for the chat dropdown and its native session menu label.
+struct NativeDropdownLabel: View {
+    let title: String
+    let symbol: String
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(title).multilineTextAlignment(.leading)
+            Spacer(minLength: 8)
+            Image(systemName: symbol).frame(width: 20)
+        }
+        .font(.system(size: 16))
+        .padding(.horizontal, 16).frame(minHeight: 44).contentShape(Rectangle())
+    }
+}
+struct NativeDropdownButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var enabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(Color.primary.opacity(enabled ? 1 : 0.35))
+            .background(configuration.isPressed ? Color(uiColor: .tertiarySystemFill) : Color.clear)
+    }
+}
 struct NativeNotice: View {
     let text: String
     var isError = false
@@ -30,30 +52,100 @@ struct NativeNotice: View {
                 Text(text).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
             }
             .font(.footnote).foregroundStyle(isError ? Color.red : Color.secondary)
-            .padding(13).background(Color.linkSurface, in: RoundedRectangle(cornerRadius: 16))
+            .padding(.vertical, 4)
             .accessibilityElement(children: .combine)
         }
     }
 }
+struct NativeSelectableText: UIViewRepresentable {
+    let value: AttributedString
+    var accessibilityIdentifier: String? = nil
+    var fontSize: CGFloat = 16
+    var textColor: UIColor = .label
+    @Environment(\.openURL) private var openURL
+
+    func makeCoordinator() -> Coordinator { Coordinator(openURL: openURL) }
+
+    func makeUIView(context: Context) -> SelectableMessageTextView {
+        let view = SelectableMessageTextView()
+        view.backgroundColor = .clear
+        view.isEditable = false
+        view.isSelectable = true
+        view.isScrollEnabled = false
+        view.textContainerInset = .zero
+        view.textContainer.lineFragmentPadding = 0
+        view.adjustsFontForContentSizeCategory = true
+        view.font = .systemFont(ofSize: fontSize)
+        view.textColor = textColor
+        let styled = NSMutableAttributedString(value)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 5
+        styled.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: styled.length))
+        view.attributedText = styled
+        view.isAccessibilityElement = true
+        let plainText = String(value.characters)
+        view.accessibilityLabel = plainText
+        view.delegate = context.coordinator
+        view.accessibilityIdentifier = accessibilityIdentifier
+        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        view.setContentHuggingPriority(.required, for: .vertical)
+        return view
+    }
+
+    func updateUIView(_ view: SelectableMessageTextView, context: Context) {
+        context.coordinator.openURL = openURL
+        view.font = .systemFont(ofSize: fontSize)
+        view.textColor = textColor
+        view.accessibilityIdentifier = accessibilityIdentifier
+        let plainText = String(value.characters)
+        let textChanged = view.accessibilityLabel != plainText
+        view.accessibilityLabel = plainText
+        let value = NSAttributedString(value)
+        if textChanged {
+            let selected = view.selectedRange
+            let styled = NSMutableAttributedString(attributedString: value)
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineSpacing = 5
+            styled.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: styled.length))
+            view.attributedText = styled
+            view.selectedRange = NSRange(location: min(selected.location, value.length), length: 0)
+        }
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: SelectableMessageTextView, context: Context) -> CGSize? {
+        guard let width = proposal.width, width.isFinite else { return nil }
+        return uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var openURL: OpenURLAction
+        init(openURL: OpenURLAction) { self.openURL = openURL }
+        func textView(_ textView: UITextView, shouldInteractWith URL: URL, in characterRange: NSRange,
+                      interaction: UITextItemInteraction) -> Bool {
+            openURL(URL)
+            return false
+        }
+    }
+}
+
+final class SelectableMessageTextView: UITextView {
+    override init(frame: CGRect, textContainer: NSTextContainer?) {
+        super.init(frame: frame, textContainer: textContainer)
+        isEditable = false
+        isSelectable = true
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        action == #selector(copy(_:))
+    }
+}
+
 struct NativeChatMarkdown: View {
     let text: String
     @AppStorage("native.diffLineWrapping") private var diffLineWrapping = true
-    private struct Block: Identifiable {
-        let id: Int
-        let content: String
-        let code: Bool
-        let language: String
-    }
-    private var blocks: [Block] {
-        let lines = text.components(separatedBy: "\n")
-        var result: [Block] = [], current: [String] = [], code = false, language = ""
-        func append() { if !current.isEmpty { result.append(Block(id: result.count, content: current.joined(separator: "\n"), code: code, language: language)); current = [] } }
-        for line in lines {
-            if line.hasPrefix("```") { append(); code.toggle(); language = code ? String(line.dropFirst(3)) : "" }
-            else { current.append(line) }
-        }
-        append(); return result
-    }
+    private var blocks: [NativeMarkdownBlock] { NativeMarkdownBlock.parse(text) }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             ForEach(blocks) { block in
@@ -70,14 +162,14 @@ struct NativeChatMarkdown: View {
                             NativeCodeBlock(text: block.content, language: block.language)
                         }
                     }.padding(14).background(Color.linkSurface, in: RoundedRectangle(cornerRadius: 16))
+                } else if let table = block.table {
+                    NativeMarkdownTableView(table: table)
                 } else {
-                    // Foundation Markdown handles emphasis and links; block rows
-                    // remain SwiftUI text, including headings and lists.
                     VStack(alignment: .leading, spacing: 7) {
                         ForEach(Array(block.content.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
                             markdownLine(line)
                         }
-                    }.textSelection(.enabled)
+                    }
                 }
             }
         }.frame(maxWidth: .infinity, alignment: .leading).tint(.blue)
@@ -86,14 +178,15 @@ struct NativeChatMarkdown: View {
         let heading = line.prefix(while: { $0 == "#" }).count
         if line == "---" || line == "***" { Divider().padding(.vertical, 8) }
         else if heading > 0 && heading <= 6 && line.dropFirst(heading).hasPrefix(" ") {
-            Text(inline(String(line.dropFirst(heading + 1))))
-                .font(heading <= 2 ? .title3.weight(.semibold) : .headline).padding(.top, 10)
+            NativeSelectableText(value: inline(String(line.dropFirst(heading + 1))), accessibilityIdentifier: "native.message.selectable",
+                                 fontSize: heading <= 2 ? 20 : 17)
+                .padding(.top, 10)
         } else if line.hasPrefix("- ") || line.hasPrefix("* ") {
-            HStack(alignment: .firstTextBaseline, spacing: 10) { Text("•"); Text(inline(String(line.dropFirst(2)))).frame(maxWidth: .infinity, alignment: .leading) }
+            HStack(alignment: .firstTextBaseline, spacing: 10) { Text("•"); NativeSelectableText(value: inline(String(line.dropFirst(2))), accessibilityIdentifier: "native.message.selectable").frame(maxWidth: .infinity, alignment: .leading) }
         } else if line.hasPrefix("> ") {
-            HStack(alignment: .top) { RoundedRectangle(cornerRadius: 2).fill(Color.secondary.opacity(0.35)).frame(width: 3); Text(inline(String(line.dropFirst(2)))).foregroundStyle(.secondary) }.fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .top) { RoundedRectangle(cornerRadius: 2).fill(Color.secondary.opacity(0.35)).frame(width: 3); NativeSelectableText(value: inline(String(line.dropFirst(2))), accessibilityIdentifier: "native.message.selectable", textColor: .secondaryLabel) }.fixedSize(horizontal: false, vertical: true)
         } else if line.isEmpty { Color.clear.frame(height: 5) }
-        else { Text(inline(line)).frame(maxWidth: .infinity, alignment: .leading) }
+        else { NativeSelectableText(value: inline(line), accessibilityIdentifier: "native.message.selectable").frame(maxWidth: .infinity, alignment: .leading) }
     }
     private func inline(_ value: String) -> AttributedString { NativeMessageLinks.attributed(value) }
 }
@@ -144,10 +237,13 @@ enum NativeMessageLinks {
 }
 struct ShareView: UIViewControllerRepresentable {
     let file: URL
+    var cleanupOnDismiss = true
     func makeUIViewController(context: Context) -> UIActivityViewController {
         let controller = UIActivityViewController(activityItems: [file], applicationActivities: nil)
         controller.view.accessibilityIdentifier = "native.file.share"
-        controller.completionWithItemsHandler = { _, _, _, _ in try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        controller.completionWithItemsHandler = { _, _, _, _ in
+            if cleanupOnDismiss { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        }
         return controller
     }
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}

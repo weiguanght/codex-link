@@ -325,7 +325,7 @@ class HistoryCatalog:
 def public(row):
     fields = ('id', 'title', 'cwd', 'archived', 'internal', 'originator', 'model', 'recency',
               'host', 'hostLabel', 'projectKey', 'projectName', 'readOnly', 'desktopEligible',
-              'discoveredBy', 'historyReadable', 'historyError', 'connected', 'pinned', 'hidden')
+              'discoveredBy', 'historyReadable', 'historyError', 'connected', 'pinned', 'hidden', 'unread')
     return {k: row[k] for k in fields if k in row}
 
 

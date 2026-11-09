@@ -7,8 +7,8 @@ from .history_catalog import HistoryUnavailable
 from .workspace_reader import WorkspaceReader, WorkspaceConflictError
 
 ROOT = '/api/native/v1'
-THREAD = re.compile(r'^/api/native/v1/threads/([0-9a-f-]{36})/(timeline|changes|detail)$')
-WORKSPACE = re.compile(r'^/api/native/v1/threads/([0-9a-f-]{36})/workspace/(tree|search|file|changes|patch)$')
+THREAD = re.compile(r'^/api/native/v1/threads/([0-9a-f-]{36})/(timeline|changes|detail|usage)$')
+WORKSPACE = re.compile(r'^/api/native/v1/threads/([0-9a-f-]{36})/workspace/(tree|search|file|import|repositories|changes|patch)$')
 
 
 def capabilities(row):
@@ -16,6 +16,7 @@ def capabilities(row):
     return {'readOnly': not control, 'send': control, 'stop': control, 'respond': control,
             'attachments': control, 'rename': control, 'threadSettings': control,
             'archive': control and row.get('host') == 'local', 'pin': True, 'hide': True,
+            'permanentDelete': control and row.get('host') == 'local',
             'fullLog': row.get('host') == 'local' and row.get('historyReadable', False),
             'workspaceRead': control and row.get('host') == 'local' and bool(row.get('cwd')),
             'workspaceWrite': control and row.get('host') == 'local' and bool(row.get('cwd'))}
@@ -28,9 +29,9 @@ def handle(handler, write, path):
         handler.check_request(write)
         if not handler.authorized(write): return True
         writable_file = WORKSPACE.fullmatch(path)
-        if write and not (writable_file and writable_file.group(2) == 'file'):
+        if write and not (writable_file and writable_file.group(2) in ('file', 'import')):
             handler.close_connection = True
-            handler.output(405, {'error': '此版本原生投影接口只接受 GET；写操作使用已认证的会话接口'})
+            handler.output(405, {'error': '此版本原生投影接口只接受 GET；工作区编辑与导入使用专用受限接口'})
             return True
         library = handler.server.reading
         if library is None: raise HistoryUnavailable('未配置本机历史服务')
@@ -55,13 +56,32 @@ def handle(handler, write, path):
                     raise PermissionError('此视图不支持读取当前工作区；请打开本机桌面会话')
                 reader = WorkspaceReader(row.get('cwd'))
                 if write:
-                    body = handler.read_json()
-                    result = reader.save(body.get('path'), body.get('text'), body.get('revision'))
-                elif action == 'tree': result = reader.tree(value('path'), int(value('offset', '0')))
-                elif action == 'search': result = reader.search(value('q'))
+                    if action == 'import':
+                        if handler.headers.get('Transfer-Encoding') or handler.headers.get_content_type() != 'application/octet-stream':
+                            raise ValueError('导入请求格式无效')
+                        lengths = handler.headers.get_all('Content-Length', [])
+                        if len(lengths) != 1 or not lengths[0].isdigit() or not 0 < int(lengths[0]) <= 20 * 1024 * 1024:
+                            raise ValueError('导入文件需为 1 字节至 20 MiB')
+                        data = handler.rfile.read(int(lengths[0]))
+                        if len(data) != int(lengths[0]): raise ValueError('导入文件传输不完整')
+                        result = reader.import_file(value('directory'), value('name'), data)
+                    else:
+                        body = handler.read_json()
+                        result = reader.save(body.get('path'), body.get('text'), body.get('revision'))
+                elif action == 'tree': result = reader.tree(value('path'), int(value('offset', '0')), value('hidden') == 'true', value('sort', 'name'), value('descending') == 'true')
+                elif action == 'search': result = reader.search(value('q'), value('hidden') == 'true')
                 elif action == 'file': result = reader.file(value('path'))
-                elif action == 'changes': result = reader.changes(value('source', 'unstaged'))
-                else: result = reader.patch(value('path'), value('source', 'unstaged'))
+                elif action == 'repositories': result = reader.repositories()
+                elif action == 'changes': result = reader.changes(value('source', 'unstaged'), repository_path=value('repository'))
+                else: result = reader.patch(value('path'), value('source', 'unstaged'), repository_path=value('repository'))
+                handler.output(200, result)
+                return True
+            if action == 'usage':
+                if row['host'] != 'local':
+                    result = {'usage': None, 'context': None, 'unavailable': '远程会话日志未提供 token 用量记录'}
+                else:
+                    snapshot = library.reader.read(row, 'page', limit=1)
+                    result = {'usage': snapshot.get('meta', {}).get('usage'), 'context': snapshot.get('meta', {}).get('context'), 'unavailable': None}
                 handler.output(200, result)
                 return True
             if explicit_log and row['host'] != 'local': raise PermissionError('远程日志视图尚未支持')

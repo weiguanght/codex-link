@@ -36,6 +36,23 @@ class WorkspaceReaderTests(unittest.TestCase):
         self.assertTrue(value['previewable']); self.assertIn('你好', value['text'])
         self.assertEqual(self.reader.tree('Sources')['entries'][0]['path'], 'Sources/main.swift')
 
+    def test_hidden_sort_metadata_and_safe_import(self):
+        (self.root / '.private').write_text('secret')
+        (self.root / 'z.txt').write_text('z')
+        (self.root / 'a.txt').write_text('longer')
+        visible = self.reader.tree()
+        self.assertNotIn('.private', [row['name'] for row in visible['entries']])
+        hidden = self.reader.tree(include_hidden=True)
+        self.assertIn('.private', [row['name'] for row in hidden['entries']])
+        files = [row for row in self.reader.tree(sort='size')['entries'] if row['kind'] == 'file']
+        self.assertEqual([row['name'] for row in files], ['z.txt', 'a.txt'])
+        self.assertIn('modified', files[0]); self.assertIn('created', files[0]); self.assertEqual(files[0]['type'], 'txt')
+        self.assertEqual(self.reader.import_file('', 'photo.bin', b'photo')['bytes'], 5)
+        with self.assertRaises(WorkspaceReadError): self.reader.import_file('', 'photo.bin', b'overwrite')
+        for name in ('.hidden', '../escape', 'sub/file'):
+            with self.assertRaises(ValueError): self.reader.import_file('', name, b'x')
+        self.assertEqual((self.root / 'photo.bin').read_bytes(), b'photo')
+
     def test_save_preserves_bom_crlf_and_mode_and_rejects_stale_revision(self):
         file = self.root / '脚本.sh'; file.write_bytes(b'\xef\xbb\xbfecho old\r\n'); file.chmod(0o751)
         initial = self.reader.file(file.name)
@@ -133,3 +150,53 @@ class WorkspaceReaderTests(unittest.TestCase):
         (self.root / 'tracked.txt').write_text('z' * 2048)
         with patch('mac.workspace_reader.GIT_BYTES', 1024):
             with self.assertRaises(WorkspaceReadError): self.reader.patch('tracked.txt')
+
+    def test_nested_repository_discovery_selection_and_workspace_paths(self):
+        self.repository()
+        for name in ('apps/mobile', 'apps/tools/worker'):
+            folder = self.root / name; folder.mkdir(parents=True)
+            self.git('-C', name, 'init', '-q')
+            (folder / 'tracked.txt').write_text('baseline\n')
+            self.git('-C', name, 'add', '.')
+            self.git('-C', name, 'commit', '-qm', 'nested baseline')
+            (folder / 'tracked.txt').write_text('staged\n')
+            self.git('-C', name, 'add', '.')
+            (folder / 'tracked.txt').write_text('working\n')
+            (folder / 'new.txt').write_text('new\n')
+        (self.root / 'linked').symlink_to(self.root / 'apps/mobile', target_is_directory=True)
+        deep = self.root / 'a/b/c/deep'; deep.mkdir(parents=True); self.git('-C', 'a/b/c/deep', 'init', '-q')
+        deps = self.root / 'node_modules/dependency'; deps.mkdir(parents=True); self.git('-C', 'node_modules/dependency', 'init', '-q')
+        result = self.reader.repositories()
+        self.assertEqual([r['path'] for r in result['repositories']], ['', 'apps/mobile', 'apps/tools/worker'])
+        self.assertFalse(result['limited'])
+        root_changes = self.reader.changes()
+        self.assertNotIn('apps/mobile/', [r['path'] for r in root_changes['files']])
+        for name in ('apps/mobile', 'apps/tools/worker'):
+            staged = self.reader.changes('staged', repository_path=name)
+            self.assertEqual(staged['repository'], name)
+            self.assertEqual(staged['root'], str(self.root))
+            self.assertEqual(staged['repositoryRoot'], str(self.root / name))
+            self.assertEqual(staged['files'][0]['path'], name + '/tracked.txt')
+            self.assertIn('+staged', self.reader.patch(name + '/tracked.txt', 'staged', repository_path=name)['text'])
+            self.assertIn('+working', self.reader.patch(name + '/tracked.txt', repository_path=name)['text'])
+            self.assertEqual(self.reader.file(name + '/new.txt')['text'], 'new\n')
+            with self.assertRaises(ValueError): self.reader.patch('tracked.txt', repository_path=name)
+        for path in ('../outside', 'linked', '/etc', '.git', 'apps/mobile/.git'):
+            with self.assertRaises((ValueError, OSError)): self.reader.changes(repository_path=path)
+
+    def test_discovery_without_root_repo_refresh_and_worktree_gitfile(self):
+        self.assertEqual(self.reader.repositories()['repositories'], [])
+        nested = self.root / 'projects/nested'; nested.mkdir(parents=True)
+        self.git('-C', 'projects/nested', 'init', '-q')
+        (nested / 'file').write_text('one\n')
+        self.git('-C', 'projects/nested', 'add', '.')
+        self.git('-C', 'projects/nested', 'commit', '-qm', 'baseline')
+        worktree = self.root / 'projects/worktree'
+        self.git('-C', 'projects/nested', 'worktree', 'add', '-q', '-b', 'fixture-worktree', str(worktree))
+        self.assertTrue((worktree / '.git').is_file())
+        (worktree / 'file').write_text('two\n')
+        self.assertEqual([r['path'] for r in self.reader.repositories()['repositories']], ['projects/nested', 'projects/worktree'])
+        self.assertEqual(self.reader.changes(repository_path='projects/worktree')['added'], 1)
+        self.assertIn('+two', self.reader.patch('projects/worktree/file', repository_path='projects/worktree')['text'])
+        with patch('mac.workspace_reader.SCAN_ENTRIES', 1):
+            self.assertTrue(self.reader.repositories()['limited'])

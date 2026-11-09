@@ -18,6 +18,8 @@ def main():
         for name in ('mac', 'vendor', 'web', 'tests'):
             shutil.copytree(ROOT / name, copy / name, ignore=ignore)
         shutil.copy2(ROOT / 'run-mac.py', copy / 'run-mac.py')
+        (copy / 'scripts').mkdir()
+        shutil.copy2(ROOT / 'scripts/update-pricing.py', copy / 'scripts/update-pricing.py')
         # No pairing files, real home, upstream sibling or build cache is copied.
         assert not (copy / '.local').exists()
         assert not (copy.parent / 'codex-mobile-bridge-1.3.2').exists()

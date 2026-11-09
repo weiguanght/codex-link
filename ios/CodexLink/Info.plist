@@ -14,6 +14,7 @@
     <key>NSLocalNetworkUsageDescription</key><string>自动发现并连接局域网内的 Mac Codex 网关，无需扫码或密码。</string>
     <key>NSBonjourServices</key><array><string>_codexlink._tcp</string></array>
     <key>NSCameraUsageDescription</key><string>由你选择拍照，作为附件发送到 Codex 会话。</string>
+    <key>NSPhotoLibraryAddUsageDescription</key><string>由你选择将会话图片保存到系统相册。</string>
     <key>NSPhotoLibraryUsageDescription</key><string>由你选择图片，作为附件发送到 Codex 会话。</string>
     <key>NSAppTransportSecurity</key><dict>
         <key>NSAllowsLocalNetworking</key><true/>

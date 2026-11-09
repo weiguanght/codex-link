@@ -56,6 +56,7 @@ struct LinkSession: Decodable, Identifiable, Hashable {
     let historyReadable: Bool?
     var pinned: Bool?
     var hidden: Bool?
+    var unread: Bool?
     var archived: Bool?
     let recency: Double?
     var identity: String { host + "|" + id }

@@ -7,11 +7,32 @@ import threading
 import uuid
 
 from .history_catalog import HistoryUnavailable, safe_log, identifier
+from .pricing import TOKEN_FIELDS, token_counts, price_estimate, service_tier
 
 MAX_RECORD = 8 * 1024 * 1024
 PAGE_BYTES = 192 * 1024
 PREVIEW = 8000
 DETAIL = 16000
+
+def usage_snapshot(value, model, parts=None):
+    if not isinstance(value, dict):
+        return None
+    counts = token_counts(value)
+    return dict(counts, model=model or '',
+                **price_estimate(parts or [dict(counts, model=model)]))
+
+
+def context_snapshot(info):
+    """Latest prompt context, never cumulative billable tokens."""
+    if not isinstance(info, dict):
+        return None
+    latest = info.get('last_token_usage')
+    used = latest.get('total_tokens') if isinstance(latest, dict) else None
+    window = info.get('model_context_window')
+    if (not isinstance(used, int) or isinstance(used, bool) or used < 0
+            or used > 10**15 or not isinstance(window, int) or isinstance(window, bool) or not 0 < window <= 10**15):
+        return None
+    return {'usedTokens': used, 'windowTokens': window}
 
 
 def text_content(value):
@@ -75,11 +96,16 @@ class LogReader:
         self.cache = OrderedDict()
         self.lock = threading.RLock()
 
-    def _scan(self, path, key, stream, fingerprint, prior):
+    def _scan(self, path, key, stream, fingerprint, prior, initial_model=None):
         entries, malformed, oversized, incomplete = [], 0, 0, 0
         turn, serial, last_user = 'history', 0, None
         first_line = True
         responses = set()
+        usage = None
+        context = None
+        previous_usage = None
+        usage_parts = {}
+        current_model, current_tier = initial_model, 'standard'
         # Read only the size observed at open; concurrent appended bytes belong
         # to the next snapshot. Unterminated invalid JSON is retried next time.
         boundary = fingerprint[2]
@@ -109,6 +135,42 @@ class LogReader:
                 continue
             payload = record.get('payload')
             payload = payload if isinstance(payload, dict) else {}
+            category = record.get('type')
+            if category in ('session_meta', 'turn_context'):
+                if isinstance(payload.get('model'), str) and payload['model']:
+                    current_model = payload['model']
+                if category == 'turn_context':
+                    current_tier = service_tier(payload.get('service_tier'))
+            if category == 'event_msg' and payload.get('type') == 'thread_settings_applied':
+                settings = payload.get('thread_settings')
+                if isinstance(settings, dict):
+                    if isinstance(settings.get('model'), str) and settings['model']:
+                        current_model = settings['model']
+                    current_tier = service_tier(settings.get('service_tier'))
+            if category == 'event_msg' and payload.get('type') == 'token_count':
+                info = payload.get('info') if isinstance(payload.get('info'), dict) else {}
+                sample = context_snapshot(info)
+                if sample is not None:
+                    context = sample
+                total = info.get('total_token_usage')
+                if isinstance(total, dict):
+                    counts = token_counts(total)
+                    # Snapshots are cumulative. Resumes can reset their baseline;
+                    # repeated snapshots and rate-limit-only events add no cost.
+                    baseline = previous_usage or dict.fromkeys(TOKEN_FIELDS, 0)
+                    if counts['total_tokens'] < baseline['total_tokens']:
+                        baseline = dict.fromkeys(TOKEN_FIELDS, 0)
+                    delta = {key: max(0, counts[key] - baseline[key]) for key in TOKEN_FIELDS}
+                    previous_usage = counts
+                    if usage is None:
+                        usage = dict.fromkeys(TOKEN_FIELDS, 0)
+                    if any(delta.values()):
+                        model = info.get('model') if isinstance(info.get('model'), str) else current_model
+                        tier = service_tier(info.get('service_tier', current_tier))
+                        part = usage_parts.setdefault((model, tier), dict(model=model, serviceTier=tier, **dict.fromkeys(TOKEN_FIELDS, 0)))
+                        for field, amount in delta.items():
+                            usage[field] += amount
+                            part[field] += amount
             if first_line:
                 first_line = False
                 if record.get('type') != 'session_meta' or identifier(payload.get('id')) != key:
@@ -162,7 +224,7 @@ class LogReader:
             warnings.append('日志末尾正在写入，未完成的记录会在下一次读取时重试。')
         if not entries:
             warnings.append('日志暂未包含可识别的对话消息，可能只有元信息或使用了不支持的格式。')
-        return {'stamp': fingerprint, 'entries': entries, 'positions': {e['key']: i for i, e in enumerate(entries)},
+        return {'stamp': fingerprint, 'entries': entries, 'positions': {e['key']: i for i, e in enumerate(entries)}, 'usage': usage, 'context': context, 'usageParts': list(usage_parts.values()), 'model': current_model,
                 'epoch': epoch, 'sequence': sequence, 'versions': versions, 'warnings': warnings, 'id': key}
 
     def _text(self, entry, stream):
@@ -191,7 +253,7 @@ class LogReader:
                 fingerprint = stamp(os.fstat(stream.fileno()))
                 index = self.cache.get(str(path))
                 if not index or index['stamp'] != fingerprint or index['id'] != metadata['id']:
-                    index = self._scan(path, metadata['id'], stream, fingerprint, index)
+                    index = self._scan(path, metadata['id'], stream, fingerprint, index, metadata.get('model'))
                     self.cache[str(path)] = index
                 self.cache.move_to_end(str(path))
                 while len(self.cache) > 8:
@@ -209,6 +271,8 @@ class LogReader:
                 'historyComplete': True, 'savedHistoryMore': False, 'loadingHistory': False, 'status': 'history',
                 'requests': [], 'submissions': [], 'goalRuntimeAvailable': False, 'sequence': index['sequence'],
                 'historyWarnings': index['warnings'], 'historyTotal': len(entries),
+                'usage': usage_snapshot(index['usage'], index.get('model') or metadata.get('model'), index.get('usageParts')) if index.get('usage') else None,
+                'context': index.get('context'),
                 'connectionError': '只读历史：不会自动连接或恢复桌面会话。'}
         base = {'epoch': epoch, 'sequence': index['sequence'], 'meta': meta, 'files': []}
         if mode == 'detail':
