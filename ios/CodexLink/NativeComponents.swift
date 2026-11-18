@@ -20,16 +20,17 @@ final class NativeClipboardState: ObservableObject {
 
 struct NativeCopyFeedback: View {
     var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "checkmark").font(.system(size: 24, weight: .bold))
-                .foregroundStyle(.white).frame(width: 56, height: 56)
-                .background(Color.green, in: Circle())
-            Text("已复制").font(.headline)
+        HStack(spacing: 12) {
+            Image(systemName: "checkmark")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(Color(red: 0.08, green: 0.22, blue: 0.20))
+                .frame(width: 28, height: 28)
+                .background(Color(red: 0.12, green: 0.72, blue: 0.57), in: Circle())
+            Text("已复制").font(.system(size: 18, weight: .medium)).foregroundStyle(.white)
         }
-        .padding(.horizontal, 24).padding(.vertical, 20)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.primary.opacity(0.08), lineWidth: 1))
-        .shadow(color: .black.opacity(0.2), radius: 20, y: 8)
+        .frame(width: 150, height: 58)
+        .background(Color(red: 0.18, green: 0.18, blue: 0.18).opacity(0.97), in: RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.16), radius: 5, y: 2)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("已复制")
         .accessibilityIdentifier("native.copy.feedback")
@@ -42,15 +43,15 @@ struct NativeCopyFeedbackModifier: ViewModifier {
     @State private var token = UUID()
     func body(content: Content) -> some View {
         content.overlay {
-            if visible { NativeCopyFeedback().transition(.scale(scale: 0.78).combined(with: .opacity)).allowsHitTesting(false) }
+            if visible { NativeCopyFeedback().transition(.scale(scale: 0.96).combined(with: .opacity)).allowsHitTesting(false) }
         }
         .onChange(of: clipboard.generation) { _ in
             let next = UUID(); token = next
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.68)) { visible = true }
+            withAnimation(.easeOut(duration: 0.16)) { visible = true }
             Task {
                 try? await Task.sleep(nanoseconds: 1_800_000_000)
                 guard token == next else { return }
-                withAnimation(.easeOut(duration: 0.18)) { visible = false }
+                withAnimation(.easeIn(duration: 0.16)) { visible = false }
             }
         }
     }

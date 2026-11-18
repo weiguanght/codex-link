@@ -64,7 +64,10 @@ final class NativeFlows: XCTestCase {
         XCTAssertGreaterThan(body.frame.height, 150)
         expand.tap()
         app.buttons["native.message.copy.user"].tap()
-        XCTAssertTrue(app.descendants(matching: .any)["native.copy.feedback"].waitForExistence(timeout: 3))
+        let copyFeedback = app.descendants(matching: .any)["native.copy.feedback"]
+        XCTAssertTrue(copyFeedback.waitForExistence(timeout: 3))
+        XCTAssertLessThanOrEqual(copyFeedback.frame.width, 160)
+        XCTAssertLessThanOrEqual(copyFeedback.frame.height, 65)
         capture("Five-line user message and centered copy confirmation")
     }
 
@@ -162,6 +165,8 @@ final class NativeFlows: XCTestCase {
         XCTAssertTrue(firstMessageText.waitForExistence(timeout: 5))
         XCTAssertLessThanOrEqual(firstMessageText.frame.minY, transcript.frame.minY + 50,
                                  "The message content should align to the top of its reusable cell")
+        XCTAssertLessThan(firstMessageText.frame.width, transcript.frame.width * 0.65,
+                          "Short user messages should not stretch across the transcript")
         XCTAssertFalse(app.textViews["native.message.selectable.user"].exists, "User messages should not share model-message selection behavior")
         XCTAssertTrue(app.buttons["native.message.copy.user"].exists, "User messages need a one-tap copy action")
         app.buttons["native.message.copy.user"].tap()

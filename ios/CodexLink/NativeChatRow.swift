@@ -69,7 +69,6 @@ private struct NativeUserMessage: View {
             Text(text)
                 .font(.system(size: 16)).lineSpacing(5).lineLimit(expanded ? nil : 5)
                 .accessibilityIdentifier("native.message.user.text")
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .overlay(alignment: .topLeading) {
                     Text(text).font(.system(size: 16)).lineSpacing(5).fixedSize(horizontal: false, vertical: true)
                         .accessibilityHidden(true).hidden().background(GeometryReader { proxy in
