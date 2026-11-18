@@ -4,7 +4,7 @@
 
 - 工作空间底部 **Codex 设置**，或 **界面设置 → Codex 默认行为、Skills 与 MCP**。
 - 已登记的本机项目菜单有 **Codex 项目配置（只读）**；也可在设置顶部切换范围。未登记的历史目录先添加为项目，SSH 项目暂不支持。
-- **界面设置**只负责外观；**Codex 设置**读取 Mac 上真实的 Codex 配置，不是手机本地模拟开关。
+- **界面设置**只负责外观；**Codex 设置**读取和修改 Mac 上真实的 Codex 配置，不是手机本地模拟开关。
 - 本文介绍 Mac 网关和网页提供的全局／项目配置页。**重启 Mac 网关、刷新 iOS 页面即可；不用重装 IPA 或重新配对。** 刷新前保存未发送草稿。iOS 原生会话的模型与推理强度面板另见 [原生 iOS 说明](native-ios.md#原生实现)。
 
 ![Codex 全局设置，合成数据](images/settings-defaults.png)
@@ -15,6 +15,7 @@
 | --- | --- | --- |
 | 配置与来源 | `config/read` | 读取有效值、用户覆盖值、来源及配置层 |
 | 全局默认值保存 | `config/batchWrite` | 带 `expectedVersion` 写用户配置，随后启动新查询回读验证 |
+| 高级配置编辑 | `/api/codex-settings/advanced` | 只编辑同一个用户级 `config.toml`；由当前 Runtime 预检类型与结构，再校验文件版本并原子写入 |
 | 管理员限制 | `configRequirements/read` | 限制可选的审批、沙盒与搜索策略；不能确认限制时不允许写入 |
 | 模型目录 | `model/list` | 按需读取；自定义服务可手动输入模型 ID |
 | 技能列表和开关 | `skills/list`、`skills/config/write` | 按目录列出技能；确认后写用户级开关，并回读状态 |
@@ -35,7 +36,9 @@
 
 表单只提交实际改动的字段。**继承**或者清空输入框会在保存时以 `null` 移除该用户级覆盖，不是强制写入某个默认值；其他 TOML 配置由原生接口保留。
 
-此页的默认推理强度写入用户级 `model_reasoning_effort` 配置。0.160.0 将其表示为模型相关字符串；配置页可读取目录建议或手动输入。原生会话面板则根据当前模型目录提供的强度选项显示下拉菜单。配置被保存或会话参数被提交，不代表模型服务已验证该组合可成功推理。
+此页的默认推理强度写入用户级 `model_reasoning_effort` 配置。0.160.0 将其表示为模型相关字符串；配置页可读取目录建议或手动输入。新建会话页将“Codex 默认”显示为 Mac 配置的有效模型与推理强度，并在不显式覆盖时继承它；切换到其他模型时使用模型目录建议的强度。配置被保存或会话参数被提交，不代表模型服务已验证该组合可成功推理。
+
+手机端表单经 Mac 网关的 Codex Runtime 写入其 `CODEX_HOME/config.toml`，不是保存到 iPhone 本地。新建会话也使用同一个 `CODEX_HOME`。高级配置编辑器只允许修改该用户级文件，拒绝符号链接，限制 1 MiB；先用 Python TOML 解析器检查语法，再在临时 `CODEX_HOME` 调用当前 Codex Runtime 的 `config/read` 预检字段类型与结构，最后检查文件版本并原子写入。并发变化会要求重新读取，不会覆盖。高级编辑可修改任意 TOML 配置项；当前 Runtime 可能忽略未知或已废弃字段。文件可能包含接入信息，只有已配对且通过认证的设备可以读取。保存不改变正在运行的任务；桌面 Codex 进程若缓存旧配置，需要重新加载配置或重启后才会使用新默认值。
 
 ## 全局可写，项目只读的原因
 
@@ -53,7 +56,7 @@
 }
 ```
 
-因此，本轮**只通过原生接口保存用户配置**。项目页显示生效值和来源，不开放伪保存、不直接改写项目 TOML 绕过限制。项目未被信任、某层被禁用或用户配置被更高层覆盖时，以原生读取结果为准。
+因此，常规配置表单**只通过原生接口保存用户配置**。高级编辑器则明确针对用户级 `config.toml`，不接受文件路径；项目页仍显示生效值和来源，不允许修改项目配置。项目未被信任、某层被禁用或用户配置被更高层覆盖时，以原生读取结果为准。
 
 codex-link 自身的项目登记仍在 `.local/workspace.json`，没有悄悄迁移到实验性 `project/create` 等接口。
 
@@ -83,7 +86,7 @@ codex-link 自身的项目登记仍在 `.local/workspace.json`，没有悄悄迁
 ## 安全与实现
 
 - `mac/settings_rpc.py`：按需启动短生命周期 stdio app-server；协议探测在临时空 HOME 中完成；RPC 方法白名单、超时、响应长度和队列上限，进程退出清理。
-- `mac/settings.py`：配置白名单、版本凭据、管理员限制、权限确认、回读和安全摘要。
+- `mac/settings.py`：配置白名单、版本凭据、管理员限制、权限确认、回读和安全摘要；高级编辑调用 Runtime 预检，不把 Rust crate 或另一份 schema 固定进网关。
 - `mac/settings_http.py`：复用认证、Host／Origin／CSRF 检查；没有通用 JSON-RPC 转发入口。
 - `web/link-settings.js` / `.css`：独立设置界面；原 `link-ui.js` 继续只负责表现层。
 
@@ -93,6 +96,9 @@ HTTP 接口：
 GET  /api/codex-settings?scope=<已登记项目键，可省略>
 POST /api/codex-settings
      {scope, revision, changes, confirmPermissions}
+GET  /api/codex-settings/advanced
+POST /api/codex-settings/advanced
+     {revision, content}
 GET  /api/codex-settings/models
 GET  /api/codex-settings/skills?scope=<项目键，可省略>
 POST /api/codex-settings/skills
@@ -100,9 +106,9 @@ POST /api/codex-settings/skills
 GET  /api/codex-settings/mcp
 ```
 
-不会把完整配置、完整 layer config、provider 定义、环境变量、MCP 工具定义或原始 RPC 错误返回手机。允许显示的开发者指令属于用户主动管理的正文，请勿把敏感内容放进截图或问题反馈。
+常规设置接口不会把完整 layer config、provider 定义、环境变量、MCP 工具定义或原始 RPC 错误返回手机。高级编辑器按用户请求读取完整的 `config.toml`；其中可能有敏感接入信息，不要在截图或问题反馈中暴露。它不接受任意路径，也不把原始 RPC 错误返回手机。
 
-配对流程、Bundle ID、Keychain、`.local/` 和上游 vendor 快照没有因本功能改变。没有集成 AGENTS.md 编辑、记忆重置、任意 TOML 编辑或实验性会话设置接管。
+配对流程、Bundle ID、Keychain、`.local/` 和上游 vendor 快照没有因本功能改变。没有集成 AGENTS.md 编辑、记忆重置、任意文件路径编辑或实验性会话设置接管。
 
 ## 验证与验收
 

@@ -161,6 +161,31 @@ class SettingsTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.service.write({'filePath': '/tmp/config.toml', 'changes': {'model': 'new'}})
         self.assertNotIn('config/batchWrite', [m for m, _ in self.rpc.calls])
 
+    def test_advanced_editor_validates_toml_and_uses_file_revision(self):
+        initial = 'model = "test-model"\nmodel_reasoning_effort = "medium"\n'
+        read = self.service.read_advanced()
+        self.assertEqual(read['content'], '')
+        saved = self.service.write_advanced({'revision': read['revision'], 'content': initial})
+        self.assertEqual(saved['status'], 'saved')
+        self.assertEqual(Path(saved['path']).read_text(), initial)
+        self.assertEqual(Path(saved['path']).stat().st_mode & 0o777, 0o600)
+        with self.assertRaises(ValueError):
+            self.service.write_advanced({'revision': saved['revision'], 'content': '[broken\n'})
+        self.assertEqual(Path(saved['path']).read_text(), initial)
+        stale = saved['revision']
+        Path(saved['path']).write_text(initial + 'web_search = "live"\n')
+        with self.assertRaises(SettingsError) as error:
+            self.service.write_advanced({'revision': stale, 'content': initial + 'sandbox_mode = "read-only"\n'})
+        self.assertEqual(error.exception.code, 'conflict')
+        self.assertIn('web_search', Path(saved['path']).read_text())
+
+    def test_advanced_editor_rejects_symlinks_and_arbitrary_paths(self):
+        target = self.root / 'outside.toml'; target.write_text('KEEP')
+        (self.rpc.home / 'config.toml').symlink_to(target)
+        with self.assertRaises(SettingsError): self.service.read_advanced()
+        with self.assertRaises(ValueError): self.service.write_advanced({'revision': 'x', 'content': 'model = "x"', 'filePath': str(target)})
+        self.assertEqual(target.read_text(), 'KEEP')
+
     def test_overrides_and_unconfirmed_readback(self):
         self.rpc.overrides['model'] = 'managed-model'; self.assertEqual(self.save(model='chosen-model')['status'], 'saved_overridden')
         self.rpc.ignore_write = True
@@ -233,6 +258,18 @@ class SettingsHTTPTests(unittest.TestCase):
         self.assertEqual(self.request(path, body, {'Cookie': self.cookie, 'Origin': self.base})[0], 403)
         self.assertEqual(self.request(path, body, {**headers, 'Origin': 'https://attacker.invalid'})[0], 403)
         code, value, _ = self.request(path, body, headers); self.assertEqual(code, 200); self.assertEqual(value['status'], 'saved')
+        self.assertEqual(self.request(path, body, headers)[0], 409)
+
+    def test_advanced_editor_uses_same_auth_and_cas(self):
+        path = '/api/codex-settings/advanced'
+        self.assertEqual(self.request(path)[0], 401)
+        headers = self.authenticate()
+        code, value, _ = self.request(path, headers=headers); self.assertEqual(code, 200)
+        body = {'revision': value['revision'], 'content': 'model = "phone-edit"\n'}
+        self.assertEqual(self.request(path, body, {**headers, 'Origin': 'https://attacker.invalid'})[0], 403)
+        code, saved, _ = self.request(path, body, headers); self.assertEqual(code, 200)
+        self.assertEqual(saved['status'], 'saved')
+        self.assertEqual(Path(saved['path']).read_text(), body['content'])
         self.assertEqual(self.request(path, body, headers)[0], 409)
 
     def test_no_rpc_passthrough_and_no_secrets_in_http_errors(self):

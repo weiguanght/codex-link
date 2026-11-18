@@ -3,8 +3,11 @@ from collections import OrderedDict
 from contextlib import nullcontext
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import tempfile
+import tomllib
 import threading
 import time
 import uuid
@@ -18,6 +21,7 @@ FIELDS = {
 }
 PERMISSIONS = {'approval_policy', 'sandbox_mode'}
 REQUIREMENTS = {'approval_policy': 'allowedApprovalPolicies', 'sandbox_mode': 'allowedSandboxModes', 'web_search': 'allowedWebSearchModes'}
+MAX_CONFIG_BYTES = 1024 * 1024
 
 
 def digest(value):
@@ -229,6 +233,91 @@ class CodexSettings:
                     catalog.cache.clear()
             return {'status': 'saved_overridden' if overridden or written['status'] == 'okOverridden' else 'saved',
                     'settings': after, 'overridden': overridden, 'liveApplied': False}
+
+    def read_advanced(self):
+        with self.gate(), self.lock:
+            self.ready()
+            path = self.home / 'config.toml'
+            if path.is_symlink():
+                raise SettingsError('用户配置是符号链接，拒绝直接编辑。', 'read_only', 403)
+            if path.exists() and not path.is_file():
+                raise SettingsError('用户配置不是普通文件。', 'read_only', 403)
+            content = path.read_text(encoding='utf-8') if path.exists() else ''
+            if len(content.encode('utf-8')) > MAX_CONFIG_BYTES:
+                raise SettingsError('配置文件超过高级编辑器的 1 MiB 上限。', 'unsupported')
+            return {'path': str(path), 'content': content, 'revision': digest(content)}
+
+    def write_advanced(self, body):
+        if not isinstance(body, dict) or set(body) != {'revision', 'content'}:
+            raise ValueError('高级配置请求格式无效')
+        revision, content = body.get('revision'), body.get('content')
+        if not isinstance(revision, str) or not isinstance(content, str) or '\x00' in content:
+            raise ValueError('配置版本或正文无效')
+        if len(content.encode('utf-8')) > MAX_CONFIG_BYTES:
+            raise ValueError('配置文件不能超过 1 MiB')
+        try:
+            tomllib.loads(content)
+        except tomllib.TOMLDecodeError as exc:
+            line = getattr(exc, 'lineno', None)
+            raise ValueError('TOML 语法错误' + (f'，第 {line} 行' if isinstance(line, int) else '')) from None
+        if self.executable:
+            self._validate_advanced_with_runtime(content)
+
+        with self.gate(), self.lock:
+            self.ready()
+            path = self.home / 'config.toml'
+            if path.is_symlink() or path.exists() and not path.is_file():
+                raise SettingsError('用户配置不是可安全编辑的普通文件。', 'read_only', 403)
+            before = path.read_text(encoding='utf-8') if path.exists() else ''
+            if digest(before) != revision:
+                raise SettingsError('Mac 配置已发生变化，请重新读取并合并；本次未写入。', 'conflict')
+            if content == before:
+                return {'status': 'unchanged', 'path': str(path), 'content': before, 'revision': digest(before)}
+
+            temporary = self.home / f'.config.toml.{uuid.uuid4().hex}.tmp'
+            fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            try:
+                with os.fdopen(fd, 'w', encoding='utf-8', newline='') as stream:
+                    stream.write(content)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                if path.is_symlink() or (path.read_text(encoding='utf-8') if path.exists() else '') != before:
+                    raise SettingsError('Mac 配置已发生变化，请重新读取并合并；本次未写入。', 'conflict')
+                os.replace(temporary, path)
+                directory = os.open(self.home, os.O_RDONLY)
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
+                if path.is_symlink() or not path.is_file():
+                    raise SettingsError('Mac 配置在写入后发生变化，请重新读取。', 'conflict')
+                actual = path.read_text(encoding='utf-8')
+                if actual != content:
+                    raise SettingsError('Mac 配置在写入后又发生变化，请重新读取。', 'conflict')
+            finally:
+                try:
+                    temporary.unlink()
+                except FileNotFoundError:
+                    pass
+            return {'status': 'saved', 'path': str(path), 'content': actual, 'revision': digest(actual)}
+
+    def _validate_advanced_with_runtime(self, content):
+        environment = {key: value for key, value in os.environ.items() if not key.startswith('CODEX_')}
+        environment.update(HOME=str(Path.home()), PATH=os.environ.get('PATH', '/usr/bin:/bin'))
+        try:
+            with tempfile.TemporaryDirectory(prefix='.codex-link-config-check-', dir=self.home) as folder:
+                candidate = Path(folder)
+                config = candidate / 'config.toml'
+                config.write_text(content, encoding='utf-8')
+                config.chmod(0o600)
+                with SettingsRPC(candidate, self.executable, env=environment) as rpc:
+                    rpc.request('config/read', {'includeLayers': True})
+        except SettingsError as exc:
+            if exc.code == 'unsupported':
+                raise SettingsError('当前 Codex Runtime 不支持配置预检，拒绝写入。', 'unsupported') from None
+            if exc.code == 'rpc_rejected':
+                raise ValueError('Codex Runtime 拒绝该配置；请检查字段类型和受支持的选项，Mac 文件未修改。') from None
+            raise SettingsError('Codex Runtime 未能确认候选配置，拒绝写入。', exc.code, exc.status) from None
 
     def models(self):
         with self.gate(), self.lock:

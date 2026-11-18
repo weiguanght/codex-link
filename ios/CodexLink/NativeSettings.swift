@@ -20,6 +20,7 @@ struct NativeAppSettings: View {
             if workspace.api.ready {
                 Section("Codex") {
                     NavigationLink { NativeCodexSettings(api: workspace.api, workspace: workspace, initialScope: "") } label: { Label("默认行为", systemImage: "slider.horizontal.3") }
+                    NavigationLink { NativeAdvancedSettings(api: workspace.api) } label: { Label("高级配置文件", systemImage: "curlybraces") }
                     NavigationLink { NativeSkillsView(api: workspace.api, scope: "") } label: { Label("Skills", systemImage: "sparkles") }
                     NavigationLink { NativeMCPView(api: workspace.api) } label: { Label("MCP 服务", systemImage: "puzzlepiece.extension") }
                     NavigationLink { NativeAccountsView(api: workspace.api) } label: { Label("账号与接入", systemImage: "person.crop.circle") }
@@ -195,6 +196,103 @@ struct NativeCodexSettings: View {
         } catch { stale = true; status = "草稿已保留。请重新读取确认实际值后再保存。"; throw error }
     }
     private func perform(_ action: @escaping () async throws -> Void) { guard !busy else { return }; busy = true; error = ""; Task { defer { busy = false }; do { try await action() } catch { self.error = error.localizedDescription } } }
+}
+
+struct NativeAdvancedSettings: View {
+    let api: NativeAPI
+    @Environment(\.dismiss) private var dismiss
+    @State private var path = ""
+    @State private var content = ""
+    @State private var original = ""
+    @State private var revision = ""
+    @State private var busy = false
+    @State private var error = ""
+    @State private var status = ""
+    @State private var confirmSave = false
+    @State private var confirmDiscard = false
+    @State private var leave = false
+    private var dirty: Bool { content != original }
+
+    var body: some View {
+        Form {
+            Section("Mac 配置文件") {
+                Text(path).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                Text("直接编辑 Codex 用户级 TOML。保存前检查语法、字段类型和文件版本，再原子写入 Mac 文件；当前任务不会改变，Codex 重新读取配置后生效。未知或已废弃字段可能被当前版本忽略。文件内容可能包含接入信息。")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            Section("TOML") {
+                TextEditor(text: $content)
+                    .font(.system(size: 13, design: .monospaced))
+                    .frame(minHeight: 380)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .accessibilityIdentifier("native.settings.advanced.editor")
+            }
+            Section {
+                NativeNotice(text: error, isError: true)
+                NativeNotice(text: status)
+                Button { requestReload() } label: { Label("重新读取", systemImage: "arrow.clockwise") }.disabled(busy)
+            }
+        }
+        .navigationTitle("高级配置")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("返回") { if dirty { leave = true } else { dismiss() } }.disabled(busy)
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("保存") { confirmSave = true }.disabled(busy || revision.isEmpty || !dirty)
+                    .accessibilityIdentifier("native.settings.advanced.save")
+            }
+        }
+        .disabled(busy)
+        .overlay { if busy && revision.isEmpty { ProgressView("读取配置…") } }
+        .interactiveDismissDisabled(dirty || busy)
+        .task { await read() }
+        .confirmationDialog("保存 Mac 的 Codex 配置？", isPresented: $confirmSave, titleVisibility: .visible) {
+            Button("验证并写入 config.toml") { Task { await save() } }
+            Button("取消", role: .cancel) {}
+        } message: { Text("只修改上方显示的用户级配置文件。无效 TOML 或已变化的文件不会覆盖 Mac 上的内容。") }
+        .confirmationDialog("放弃未保存的配置？", isPresented: $confirmDiscard, titleVisibility: .visible) {
+            Button("放弃并重新读取", role: .destructive) { Task { await read() } }
+            Button("继续编辑", role: .cancel) {}
+        }
+        .confirmationDialog("放弃未保存的配置？", isPresented: $leave, titleVisibility: .visible) {
+            Button("放弃并返回", role: .destructive) { dismiss() }
+            Button("继续编辑", role: .cancel) {}
+        }
+    }
+
+    private func requestReload() {
+        if dirty { confirmDiscard = true } else { Task { await read() } }
+    }
+
+    private func read() async {
+        guard !busy else { return }
+        busy = true; error = ""; defer { busy = false }
+        do { accept(try await api.value("/api/codex-settings/advanced")); status = "已读取 Mac 配置文件" }
+        catch { self.error = error.localizedDescription }
+    }
+
+    private func save() async {
+        guard !busy, !revision.isEmpty else { return }
+        busy = true; error = ""; defer { busy = false }
+        do {
+            let result = try await api.value("/api/codex-settings/advanced", body: json(["revision": string(revision), "content": string(content)]))
+            accept(result); status = result["status"].string == "unchanged" ? "文件没有变化" : "已写入 Mac 配置文件"
+        } catch {
+            self.error = error.localizedDescription
+            status = "草稿已保留。请重新读取并合并后再保存。"
+        }
+    }
+
+    private func accept(_ value: JSONValue) {
+        path = value["path"].string
+        content = value["content"].string
+        original = content
+        revision = value["revision"].string
+    }
 }
 
 struct NativeSkillsView: View {

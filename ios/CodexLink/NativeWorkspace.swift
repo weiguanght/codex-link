@@ -411,6 +411,9 @@ struct NativeNewChat: View {
     private var selectedProject: LinkProject? { projects.first { $0.key == project } }
     private var canOverrideSettings: Bool { selectedProject?.host == nil || selectedProject?.host == "local" }
     private var defaultModelID: String { settings["fields"]["model"]["effective"].string }
+    private var configuredEffort: String { settings["fields"]["model_reasoning_effort"]["effective"].string }
+    private var defaultModelLabel: String { defaultModelID.isEmpty ? "Codex 默认模型" : "Codex 默认模型（\(defaultModelID)）" }
+    private var defaultEffortLabel: String { configuredEffort.isEmpty ? "Codex 默认" : "Codex 默认（\(configuredEffort)）" }
     private var effortModelID: String { modelID.isEmpty ? defaultModelID : modelID }
     private var availableEfforts: [String] {
         models.first { $0["id"].string == effortModelID }?["efforts"].array.map(\.string) ?? []
@@ -433,13 +436,13 @@ struct NativeNewChat: View {
                 if canOverrideSettings {
                     Section("模型") {
                         Picker("模型", selection: $modelID) {
-                            Text("Codex 默认模型").tag("")
+                            Text(defaultModelLabel).tag("")
                             ForEach(Array(models.enumerated()), id: \.offset) { _, row in
                                 Text(row["name"].string.isEmpty ? row["id"].string : row["name"].string).tag(row["id"].string)
                             }
                         }.pickerStyle(.menu).accessibilityIdentifier("native.chat.model")
                         Picker("推理强度", selection: $effort) {
-                            Text("Codex 默认").tag("")
+                            Text(defaultEffortLabel).tag("")
                             ForEach(availableEfforts, id: \.self) { Text($0).tag($0) }
                         }.pickerStyle(.menu).disabled(availableEfforts.isEmpty).accessibilityIdentifier("native.chat.effort")
                     }
@@ -477,9 +480,11 @@ struct NativeNewChat: View {
                 catch { if self.error.isEmpty { self.error = "模型选项暂不可用：" + error.localizedDescription } }
             }
             .onChange(of: modelID) { selected in
+                guard !selected.isEmpty else { effort = ""; return }
                 guard let row = models.first(where: { $0["id"].string == selected }) else { effort = ""; return }
                 let options = row["efforts"].array.map(\.string)
-                effort = options.contains(row["defaultEffort"].string) ? row["defaultEffort"].string : ""
+                let preferred = selected == defaultModelID ? configuredEffort : row["defaultEffort"].string
+                effort = options.contains(preferred) ? preferred : ""
             }
         }
     }

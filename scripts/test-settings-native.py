@@ -26,7 +26,7 @@ def main():
         project = root / 'project'; (project / '.codex').mkdir(parents=True)
         env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(root), 'CODEX_HOME': str(home)}
         factory = lambda: SettingsRPC(home, args.runtime, env=env)
-        bridge = SimpleNamespace(codex_home=home)
+        bridge = SimpleNamespace(codex_home=home, catalog_reader=SimpleNamespace(executable=args.runtime))
         workspace = SimpleNamespace(project=lambda _: {'name': 'Synthetic', 'host': 'local', 'cwd': str(project)})
         service = CodexSettings(bridge, workspace, rpc_factory=factory, schema=schema)
         def save(changes):
@@ -67,7 +67,18 @@ def main():
         row = next(s for s in skills['skills'] if Path(s['path']) == skill)
         out = service.skill_write({'revision': skills['revision'], 'path': row['path'], 'enabled': False, 'confirmed': True})
         assert any(s['path'] == row['path'] and not s['enabled'] for s in out['skills'])
-        print('PASS:', schema.get()['version'], 'isolated read/write/clear/readback, native CAS, project read-only, skills toggle')
+        editor = service.read_advanced()
+        content = 'model = "gpt-5"\nmodel_reasoning_effort = "high"\n'
+        saved_editor = service.write_advanced({'revision': editor['revision'], 'content': content})
+        assert saved_editor['content'] == content and Path(saved_editor['path']).read_text() == content
+        try:
+            service.write_advanced({'revision': saved_editor['revision'], 'content': 'model = 7\n'})
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('Codex Runtime accepted a config field with the wrong type')
+        assert Path(saved_editor['path']).read_text() == content
+        print('PASS:', schema.get()['version'], 'isolated read/write/clear/readback, native CAS, project read-only, skills toggle, TOML edit and runtime validation')
 
 
 if __name__ == '__main__': main()

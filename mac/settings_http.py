@@ -14,7 +14,9 @@ def handle(handler, write, path):
         if settings is None:
             raise SettingsError('设置服务未配置。', 'unsupported')
         scope = parse_qs(urlsplit(handler.path).query).get('scope', [''])[0]
-        if path == '/api/codex-settings':
+        if path == '/api/codex-settings/advanced':
+            result = settings.write_advanced(handler.read_json()) if write else settings.read_advanced()
+        elif path == '/api/codex-settings':
             result = settings.write(handler.read_json()) if write else settings.read(scope)
         elif path == '/api/codex-settings/skills':
             result = settings.skill_write(handler.read_json()) if write else settings.skills(scope)
