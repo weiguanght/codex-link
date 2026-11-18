@@ -60,6 +60,21 @@ final class NativeSmoke: ObservableObject {
     @Published var result = "Testing…"
     init() { let api = NativeAPI(); self.api = api; workspace = WorkspaceModel(api: api); chat = ChatModel(api: api) }
     func require(_ value: Bool, _ message: String) throws { if !value { throw LinkError.message(message) } }
+    private func verifyPollStopsAfterSessionClears(_ target: LinkSession) async throws {
+        let pollingModel = ChatModel(api: api)
+        let pollingTask = Task { await pollingModel.run(target) }
+        defer { pollingTask.cancel() }
+        for _ in 0..<100 {
+            if pollingModel.meta != .null { break }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        try require(pollingModel.meta != .null, "Poller did not load its initial timeline")
+        try await Task.sleep(nanoseconds: 150_000_000)
+        await pollingModel.run(nil)
+        await pollingTask.value
+        try require(pollingModel.session == nil && pollingModel.rows.isEmpty,
+                    "A stale polling task restored a cleared session")
+    }
     private func verifyTurnProcessLifecycle(_ desktop: LinkSession) async throws {
         let source = ChatModel(api: api)
         let sourceTask = Task { await source.run(desktop) }
@@ -477,6 +492,8 @@ final class NativeSmoke: ObservableObject {
                 checks.append("relaunch without replay + stable retry ID + acknowledged cleanup + forget cancels save")
                 checks.append("native send + uncertain retry ID + stop + approval response")
                 checks.append("idle follow-up sends normally + finished-task race fallback + uncertain steering retry retains ID")
+                try await verifyPollStopsAfterSessionClears(desktop)
+                checks.append("polling loop stops safely when its active session is cleared during sleep")
                 try await verifyTurnProcessLifecycle(desktop)
                 checks.append("running process auto-expands + intermediate model/user messages stay inside + completion auto-collapses")
             }

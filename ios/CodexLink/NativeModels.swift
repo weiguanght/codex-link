@@ -322,8 +322,8 @@ final class ChatModel: ObservableObject {
             let wanted = row.turnRunning ? Int.max : max(40, append ? loaded.count + 40 : cached?.rows.count ?? 0)
             var next: Int?
             repeat {
-                var query = params(); query["turn"] = turnId; query["offset"] = String(offset); query["limit"] = "40"
-                let page: NativeProcessPage = try await api.request(path("process"), query: query)
+                var query = params(for: target); query["turn"] = turnId; query["offset"] = String(offset); query["limit"] = "40"
+                let page: NativeProcessPage = try await api.request(path("process", for: target), query: query)
                 guard !Task.isCancelled, token == generation, currentEpoch == epoch, session?.identity == target.identity,
                       rows.contains(where: { $0.key == row.key && $0.version == row.version }),
                       page.epoch == currentEpoch, page.turnId == turnId, page.summaryVersion == row.version.identifier else { return }
@@ -340,8 +340,9 @@ final class ChatModel: ObservableObject {
             }
         }
     }
-    private func refreshExpandedProcesses() async {
+    private func refreshExpandedProcesses(for target: LinkSession, generation token: Int) async {
         for row in rows where row.isTurnSummary && processExpanded(row) {
+            guard isCurrent(target, generation: token) else { return }
             await loadProcess(row)
         }
     }
@@ -365,13 +366,16 @@ final class ChatModel: ObservableObject {
         } catch { /* Opening the detail page offers an explicit retry on failure. */ }
     }
     func wasResponded(_ request: JSONValue) -> Bool { responded.contains(request["id"].identifier) }
-    private func params() -> [String: String] { ["host": session?.host ?? "local", "view": logView ? "log" : "live", "projection": "turns"] }
+    private func params(for target: LinkSession) -> [String: String] { ["host": target.host, "view": logView ? "log" : "live", "projection": "turns"] }
     private func rowExists(_ row: NativeRow) -> Bool {
         rows.contains(where: { $0.key == row.key && $0.version == row.version }) ||
             processCache.values.contains { $0.rows.contains(where: { $0.key == row.key && $0.version == row.version }) }
     }
-    private func path(_ action: String) -> String { "/api/native/v1/threads/\(session!.id)/\(action)" }
-    private func actionPath(_ action: String) -> String { "/api/sessions/\(session!.id)/\(action)" }
+    private func path(_ action: String, for target: LinkSession) -> String { "/api/native/v1/threads/\(target.id)/\(action)" }
+    private func actionPath(_ action: String, for target: LinkSession) -> String { "/api/sessions/\(target.id)/\(action)" }
+    private func isCurrent(_ target: LinkSession, generation token: Int) -> Bool {
+        !Task.isCancelled && token == generation && session?.identity == target.identity
+    }
     func primeDraft(_ text: String, for target: LinkSession) {
         var value = restoredDraft(for: target.identity); value.text = text; saveDraft(value, for: target.identity)
         if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { autoSend.insert(target.identity) }
@@ -382,8 +386,14 @@ final class ChatModel: ObservableObject {
         await send()
     }
 
-    func run(_ target: LinkSession?) async {
+    func run(_ requestedTarget: LinkSession?) async {
         flushDraft()
+        let target: LinkSession?
+        if let requestedTarget, let current = session, current.identity == requestedTarget.identity {
+            target = current
+        } else {
+            target = requestedTarget
+        }
         let canResumeTimeline = target != nil && session?.identity == target?.identity && loadedLogView == logView && sequence >= 0
         generation += 1; let token = generation
         processLoadingTurns = []
@@ -396,35 +406,41 @@ final class ChatModel: ObservableObject {
             draft = target.map { restoredDraft(for: $0.identity) } ?? ChatDraft()
             isRestoringDraft = false
         }
-        guard target != nil else { loading = false; return }
+        guard let target else { loading = false; return }
         if canResumeTimeline {
             loading = false
         } else {
             loading = true
             do {
-                let page: TimelinePage = try await api.request(path("timeline"), query: params())
-                guard token == generation, !Task.isCancelled else { return }
+                let page: TimelinePage = try await api.request(path("timeline", for: target), query: params(for: target))
+                guard isCurrent(target, generation: token) else { return }
                 apply(page, replace: true); loadedLogView = logView
                 loading = false
-                await refreshExpandedProcesses()
+                await refreshExpandedProcesses(for: target, generation: token)
+                guard isCurrent(target, generation: token) else { return }
                 await sendPrimedDraftIfReady()
-                if let target, target.readOnly == true, target.host == "local", target.originator == "codex-tui" {
+                guard isCurrent(target, generation: token) else { return }
+                if target.readOnly == true, target.host == "local", target.originator == "codex-tui" {
                     Task { await convertCLIIfNeeded(target) }
                 }
-            } catch { if !Task.isCancelled && token == generation { self.pollingError = error.localizedDescription } }
+            } catch { if isCurrent(target, generation: token) { self.pollingError = error.localizedDescription } }
             if token == generation { loading = false }
         }
-        while !Task.isCancelled && token == generation {
+        while isCurrent(target, generation: token) {
             do {
                 try await Task.sleep(nanoseconds: pollingError.isEmpty ? 1_200_000_000 : 3_000_000_000)
-                var query = params(); query["after"] = String(sequence); query["epoch"] = epoch; query["start"] = before ?? ""
-                let page: TimelinePage = try await api.request(path(sequence < 0 ? "timeline" : "changes"), query: query)
-                guard token == generation, !Task.isCancelled else { return }
+                guard isCurrent(target, generation: token) else { return }
+                var query = params(for: target); query["after"] = String(sequence); query["epoch"] = epoch; query["start"] = before ?? ""
+                let page: TimelinePage = try await api.request(path(sequence < 0 ? "timeline" : "changes", for: target), query: query)
+                guard isCurrent(target, generation: token) else { return }
                 if !pollingError.isEmpty { pollingError = "" }
                 apply(page, replace: page.reset == true || sequence < 0)
-                await refreshExpandedProcesses(); await sendPrimedDraftIfReady()
+                await refreshExpandedProcesses(for: target, generation: token)
+                guard isCurrent(target, generation: token) else { return }
+                await sendPrimedDraftIfReady()
+                guard isCurrent(target, generation: token) else { return }
             } catch is CancellationError { return }
-            catch { if !Task.isCancelled && token == generation { self.pollingError = error.localizedDescription } }
+            catch { if isCurrent(target, generation: token) { self.pollingError = error.localizedDescription } }
         }
     }
 
@@ -445,7 +461,7 @@ final class ChatModel: ObservableObject {
             guard updated.readOnly != true else { throw LinkError.message("转换未能启用会话控制") }
             sequence = -1
             session = updated
-            Task { await run(updated) }
+            // The active run loop sees sequence = -1 and reloads this thread.
         } catch {
             if session?.identity == target.identity { conversionError = error.localizedDescription }
         }
@@ -482,44 +498,44 @@ final class ChatModel: ObservableObject {
         if files != updatedFiles { files = updatedFiles }
     }
     func older(beforeApply: (() -> Void)? = nil) async {
-        guard hasMore, !loadingOlder, session != nil else { return }
+        guard hasMore, !loadingOlder, let target = session else { return }
         let token = generation; loadingOlder = true
         defer { if token == generation { loadingOlder = false } }
         do {
-            var query = params(); query["limit"] = "50"; query["before"] = before
-            let page: TimelinePage = try await api.request(path("timeline"), query: query)
-            guard token == generation, !Task.isCancelled else { return }
+            var query = params(for: target); query["limit"] = "50"; query["before"] = before
+            let page: TimelinePage = try await api.request(path("timeline", for: target), query: query)
+            guard isCurrent(target, generation: token) else { return }
             beforeApply?()
             var transaction = Transaction(); transaction.disablesAnimations = true
             withTransaction(transaction) { apply(page, replace: page.reset == true, older: true) }
         } catch { if token == generation { self.error = error.localizedDescription } }
     }
     func expand(_ row: NativeRow) async throws {
-        guard session != nil, rowExists(row) else { throw CancellationError() }
+        guard let target = session, rowExists(row) else { throw CancellationError() }
         let token = generation, currentEpoch = epoch
         let offset = details[row.key]?.version == row.version ? details[row.key]?.next ?? 0 : 0
         let key = "\(generation)|\(epoch)|\(row.key)|\(row.version.identifier)|\(offset)"
         if let existing = detailLoads[key] { try await existing.value; return }
-        let task = Task { try await expandPage(row, generation: token, epoch: currentEpoch) }
+        let task = Task { try await expandPage(row, generation: token, epoch: currentEpoch, target: target) }
         detailLoads[key] = task
         defer { detailLoads.removeValue(forKey: key) }
         try await task.value
     }
-    private func expandPage(_ row: NativeRow, generation token: Int, epoch currentEpoch: String) async throws {
+    private func expandPage(_ row: NativeRow, generation token: Int, epoch currentEpoch: String, target: LinkSession) async throws {
         try Task.checkCancellation()
-        guard token == generation, currentEpoch == epoch, let target = session else { throw CancellationError() }
+        guard isCurrent(target, generation: token), currentEpoch == epoch else { throw CancellationError() }
         let offset = details[row.key]?.version == row.version ? details[row.key]?.next ?? 0 : 0
-        var query = params(); query["key"] = currentEpoch + "." + row.key; query["offset"] = String(offset); query["version"] = row.version.identifier
+        var query = params(for: target); query["key"] = currentEpoch + "." + row.key; query["offset"] = String(offset); query["version"] = row.version.identifier
         let result = try await api.value("/api/native/v1/threads/\(target.id)/detail", query: query)
         try Task.checkCancellation()
-        guard token == generation, currentEpoch == epoch, session?.identity == target.identity, result["version"] == row.version, result["offset"].int == offset,
+        guard isCurrent(target, generation: token), currentEpoch == epoch, result["version"] == row.version, result["offset"].int == offset,
               rowExists(row) else { throw LinkError.message("内容已变化，请重新展开") }
         let text = (offset == 0 ? "" : details[row.key]?.text ?? "") + result["text"].string
         details[row.key] = (row.version, text, result["next"] == .null ? nil : result["next"].int); revision += 1
     }
     func action(_ action: String, body: JSONValue = .object([:])) async throws -> JSONValue {
-        guard !readOnly, session != nil else { throw LinkError.message("当前为只读历史") }
-        return try await api.value(actionPath(action), query: ["host": session!.host], body: body)
+        guard !readOnly, let target = session else { throw LinkError.message("当前为只读历史") }
+        return try await api.value(actionPath(action, for: target), query: ["host": target.host], body: body)
     }
     func reconnect() async throws { _ = try await action("reconnect", body: json(["activate": .bool(true)])) }
     func stop() async throws { _ = try await action("stop") }
