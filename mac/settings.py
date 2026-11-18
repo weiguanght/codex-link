@@ -22,7 +22,6 @@ FIELDS = {
     'model_context_window': 'integer', 'model_auto_compact_token_limit': 'integer',
     'model_auto_compact_token_limit_scope': 'choice', 'model_post_turn_compact_threshold_percent': 'integer',
     'approval_policy': 'choice', 'approvals_reviewer': 'choice', 'sandbox_mode': 'choice',
-    'allow_login_shell': 'boolean',
     'developer_instructions': 'multiline', 'instructions': 'multiline', 'compact_prompt': 'multiline',
     'include_permissions_instructions': 'boolean',
     'project_doc_max_bytes': 'integer', 'include_environment_context': 'boolean',
@@ -30,8 +29,7 @@ FIELDS = {
     'include_collaboration_mode_instructions': 'boolean',
     'features.memories': 'boolean', 'memories.generate_memories': 'boolean',
     'memories.use_memories': 'boolean', 'memories.disable_on_external_context': 'boolean',
-    'web_search': 'choice', 'tool_output_token_limit': 'integer', 'background_terminal_max_timeout': 'integer',
-    'history.persistence': 'choice', 'history.max_bytes': 'integer',
+    'web_search': 'choice', 'tool_output_token_limit': 'integer',
     'project_doc_fallback_filenames': 'string-list', 'project_root_markers': 'string-list',
     'agents.enabled': 'boolean', 'agents.max_concurrent_threads_per_session': 'integer',
     'agents.max_depth': 'integer', 'agents.default_subagent_model': 'text',
@@ -41,12 +39,9 @@ FIELDS = {
     'memories.max_raw_memories_for_consolidation': 'integer', 'memories.max_rollout_age_days': 'integer',
     'memories.max_unused_days': 'integer', 'memories.max_rollouts_per_startup': 'integer',
     'memories.min_rate_limit_remaining_percent': 'integer', 'memories.min_rollout_idle_hours': 'integer',
-    'file_opener': 'choice', 'hide_agent_reasoning': 'boolean', 'show_raw_agent_reasoning': 'boolean',
-    'tui.animations': 'boolean', 'tui.show_tooltips': 'boolean', 'tui.collapse_turn_details': 'boolean',
-    'tui.sidebar_width_percent': 'integer', 'check_for_update_on_startup': 'boolean',
     'thread_unload_delay_secs': 'integer', 'analytics.enabled': 'boolean', 'feedback.enabled': 'boolean',
 }
-PERMISSIONS = {'approval_policy', 'approvals_reviewer', 'sandbox_mode', 'allow_login_shell'}
+PERMISSIONS = {'approval_policy', 'approvals_reviewer', 'sandbox_mode'}
 LEGACY_PERMISSIONS = {'approval_policy', 'sandbox_mode'}
 REQUIREMENTS = {'approval_policy': 'allowedApprovalPolicies', 'approvals_reviewer': 'allowedApprovalsReviewers',
                 'sandbox_mode': 'allowedSandboxModes', 'web_search': 'allowedWebSearchModes'}
@@ -54,8 +49,7 @@ REQUIREMENTS = {'approval_policy': 'allowedApprovalPolicies', 'approvals_reviewe
 # enable these options when config/read actually advertises their parent key.
 TOML_CHOICES = {'personality': ['none', 'friendly', 'pragmatic'],
                 'service_tier': ['default', 'fast', 'flex'],
-                'history.persistence': ['save-all', 'none'],
-                'file_opener': ['vscode', 'vscode-insiders', 'windsurf', 'cursor', 'none']}
+                }
 MODEL_IDS = {'model', 'review_model', 'agents.default_subagent_model', 'memories.extract_model', 'memories.consolidation_model'}
 EFFORT_IDS = {'model_reasoning_effort', 'plan_mode_reasoning_effort', 'agents.default_subagent_reasoning_effort'}
 INTEGER_BOUNDS = {'model_context_window': (1, 2**53 - 1),
@@ -64,8 +58,7 @@ INTEGER_BOUNDS = {'model_context_window': (1, 2**53 - 1),
                   'agents.max_concurrent_threads_per_session': (1, 2**53 - 1),
                   'agents.max_depth': (0, 2**31 - 1), 'goals.max_goal_token_budget': (1, 2**53 - 1),
                   'memories.max_raw_memories_for_consolidation': (1, 4096),
-                  'memories.max_rollouts_per_startup': (1, 128), 'memories.min_rate_limit_remaining_percent': (0, 100),
-                  'tui.sidebar_width_percent': (1, 99)}
+                  'memories.max_rollouts_per_startup': (1, 128), 'memories.min_rate_limit_remaining_percent': (0, 100)}
 TOML_KEY_ALIASES = {
     'agents.max_concurrent_threads_per_session': 'agents.max_threads',
     'memories.disable_on_external_context': 'memories.no_memories_if_mcp_or_web_search',
@@ -211,8 +204,6 @@ class CodexSettings:
                 field_reason = '当前运行时未声明此配置项。'
             elif kind == 'choice' and not choices:
                 field_reason = '此配置项没有可用的选项或被管理员限制。'
-            elif key == 'allow_login_shell' and isinstance((requirements or {}).get('allowLoginShell'), bool):
-                field_reason = '登录 Shell 由管理员管理。'
             elif key in LEGACY_PERMISSIONS and (config.get('permissions') is not None or config.get('default_permissions') is not None):
                 field_reason = '已配置命名权限方案，避免与旧式沙盒设置冲突；请在 Mac 管理。'
             effective = config_value(config, stored_key(config, key))

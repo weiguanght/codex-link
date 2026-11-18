@@ -18,9 +18,8 @@ struct NativeAppSettings: View {
                     category(.permissions, detail: "命令审批、审核方式与执行沙盒", icon: "shield", color: .orange)
                     category(.instructions, detail: "开发者指令、环境信息与记忆", icon: "doc.text", color: .indigo)
                     category(.agents, detail: "并行子代理、嵌套层数和目标预算", icon: "person.2", color: .purple)
-                    category(.tools, detail: "联网搜索、终端、Skills 与 MCP", icon: "wrench.and.screwdriver", color: .teal)
-                    category(.history, detail: "CLI 输入历史、项目识别与运行时", icon: "clock.arrow.circlepath", color: .blue)
-                    category(.cli, detail: "终端界面、输出与文件打开方式", icon: "terminal", color: .teal)
+                    category(.tools, detail: "联网搜索、Skills 与 MCP", icon: "wrench.and.screwdriver", color: .teal)
+                    category(.history, detail: "项目识别、运行时与隐私", icon: "clock.arrow.circlepath", color: .blue)
                 }
             }
             Section("连接与高级") {
@@ -35,7 +34,7 @@ struct NativeAppSettings: View {
                         entry("高级配置", detail: "直接编辑 config.toml", icon: "curlybraces", color: .gray)
                     }
                     NavigationLink { NativeConfigReference(api: workspace.api) } label: {
-                        entry("全部配置项", detail: "搜索 TOML 键、类型和可选值", icon: "list.bullet.rectangle", color: .gray)
+                        entry("设置项索引", detail: "搜索适用的 TOML 键、类型和可选值", icon: "list.bullet.rectangle", color: .gray)
                     }
                 }
             }
@@ -142,7 +141,7 @@ private struct NativeMacConnectionSettings: View {
 }
 
 enum CodexSettingsCategory: CaseIterable {
-    case models, permissions, instructions, agents, tools, history, cli
+    case models, permissions, instructions, agents, tools, history
 
     var title: String {
         switch self {
@@ -150,9 +149,8 @@ enum CodexSettingsCategory: CaseIterable {
         case .permissions: return "权限与沙盒"
         case .instructions: return "指令与记忆"
         case .agents: return "代理与目标"
-        case .tools: return "工具与终端"
-        case .history: return "历史与存储"
-        case .cli: return "Codex CLI 界面"
+        case .tools: return "工具"
+        case .history: return "项目与隐私"
         }
     }
 
@@ -172,7 +170,7 @@ enum CodexSettingsCategory: CaseIterable {
         case .permissions:
             return [
                 .init("审批与沙盒", [("approval_policy", "审批策略"), ("approvals_reviewer", "由谁审核"),
-                                     ("sandbox_mode", "执行沙盒"), ("allow_login_shell", "允许使用登录 Shell")])
+                                     ("sandbox_mode", "执行沙盒")])
             ]
         case .instructions:
             return [
@@ -201,23 +199,12 @@ enum CodexSettingsCategory: CaseIterable {
             ]
         case .tools:
             return [
-                .init("工具", [("web_search", "联网搜索"), ("tool_output_token_limit", "工具输出上限（Token）")]),
-                .init("终端", [("background_terminal_max_timeout", "后台终端等待上限（毫秒）")])
+                .init("工具", [("web_search", "联网搜索"), ("tool_output_token_limit", "工具输出上限（Token）")])
             ]
         case .history:
             return [
-                .init("CLI 输入历史", [("history.persistence", "保存方式"), ("history.max_bytes", "历史文件上限（字节）")],
-                      note: "此项控制 CLI 输入记录 history.jsonl。会话和聊天记录另行保存。"),
-                .init("项目与运行时", [("project_root_markers", "项目根目录标记"), ("thread_unload_delay_secs", "空闲会话卸载延迟（秒）"),
-                                      ("check_for_update_on_startup", "启动时检查更新")]),
+                .init("项目与运行时", [("project_root_markers", "项目根目录标记"), ("thread_unload_delay_secs", "空闲会话卸载延迟（秒）")]),
                 .init("隐私", [("analytics.enabled", "分析遥测"), ("feedback.enabled", "允许提交反馈")])
-            ]
-        case .cli:
-            return [
-                .init("显示与交互", [("tui.animations", "动画"), ("tui.show_tooltips", "显示操作提示"),
-                                     ("tui.collapse_turn_details", "折叠回合详情"), ("tui.sidebar_width_percent", "侧栏宽度（%）")]),
-                .init("输出", [("file_opener", "文件链接打开方式"), ("hide_agent_reasoning", "隐藏推理摘要"),
-                              ("show_raw_agent_reasoning", "显示原始推理")])
             ]
         }
     }
@@ -535,6 +522,7 @@ struct NativeCodexSettings: View {
 private struct CodexConfigReference: Decodable {
     let version: String
     let topLevelCount: Int
+    let sourceTopLevelCount: Int
     let entries: [Entry]
 
     struct Entry: Decodable, Identifiable {
@@ -576,7 +564,7 @@ private struct NativeConfigReference: View {
                     }
                     if results.isEmpty { Text("没有匹配的配置项。").foregroundStyle(.secondary) }
                 } header: {
-                    Text("Codex \(catalog.version) · \(catalog.topLevelCount) 个一级键")
+                    Text("Codex \(catalog.version) · \(catalog.topLevelCount) 个适用一级键（源 schema 共 \(catalog.sourceTopLevelCount) 个）")
                 }
             } else if !error.isEmpty {
                 Section {
@@ -585,7 +573,7 @@ private struct NativeConfigReference: View {
                 }
             }
         }
-        .navigationTitle("全部配置项").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("设置项索引").navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索 TOML 键或设置名称")
         .overlay { if busy { ProgressView("读取配置索引…") } }
         .task { if catalog == nil { await load() } }

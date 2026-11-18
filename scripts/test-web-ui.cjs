@@ -647,7 +647,7 @@ const engine = process.env.UI_BROWSER === 'webkit' ? webkit : chromium;
     await page.waitForFunction(() => document.getElementById('codex-settings-status').textContent.includes('回读确认'));
     assert.deepEqual(writes.filter(w => w.path === '/api/codex-settings').at(-1).body.changes,
       {project_root_markers: ['.git', 'Package.swift']});
-    await settings.getByRole('button', {name: '全部配置项', exact: true}).click();
+    await settings.getByRole('button', {name: '设置项索引', exact: true}).click();
     const configSearch = settings.getByRole('searchbox', {name: '搜索 TOML 键或设置名称'});
     await configSearch.fill('mcp_servers.*.command');
     await settings.locator('summary').getByText('mcp_servers.*.command', {exact: true}).click();

@@ -44,14 +44,13 @@ def main():
             'review_model': 'gpt-5', 'plan_mode_reasoning_effort': 'high', 'personality': 'pragmatic',
             'service_tier': 'default', 'model_context_window': 128000, 'model_auto_compact_token_limit': 64000,
             'model_auto_compact_token_limit_scope': 'total', 'model_post_turn_compact_threshold_percent': 75,
-            'approvals_reviewer': 'user', 'allow_login_shell': False, 'include_environment_context': False,
+            'approvals_reviewer': 'user', 'include_environment_context': False,
             'include_environment_context_time': False, 'include_apps_instructions': False,
             'include_collaboration_mode_instructions': False,
             'compact_prompt': 'Synthetic compact prompt', 'project_doc_max_bytes': 4096,
             'features.memories': True, 'memories.generate_memories': True,
             'memories.use_memories': False, 'memories.disable_on_external_context': True,
-            'tool_output_token_limit': 3000, 'background_terminal_max_timeout': 45000,
-            'history.persistence': 'none', 'history.max_bytes': 100000,
+            'tool_output_token_limit': 3000,
             'instructions': 'Synthetic system instructions', 'include_permissions_instructions': False,
             'project_doc_fallback_filenames': ['GUIDE.md'], 'project_root_markers': ['.git', 'Package.swift'],
             'agents.enabled': True, 'agents.max_concurrent_threads_per_session': 4, 'agents.max_depth': 2,
@@ -61,12 +60,10 @@ def main():
             'memories.max_unused_days': 14, 'memories.max_rollouts_per_startup': 6,
             'memories.min_rate_limit_remaining_percent': 25, 'memories.min_rollout_idle_hours': 16,
             'memories.extract_model': 'gpt-5', 'memories.consolidation_model': 'gpt-5',
-            'file_opener': 'none', 'hide_agent_reasoning': True, 'show_raw_agent_reasoning': False,
-            'tui.animations': False, 'tui.show_tooltips': False, 'tui.collapse_turn_details': True,
-            'tui.sidebar_width_percent': 48, 'check_for_update_on_startup': False,
             'thread_unload_delay_secs': 300, 'analytics.enabled': False, 'feedback.enabled': False,
         }
-        available = {key: item for key, item in samples.items() if before['fields'][key]['supported']}
+        available = {key: item for key, item in samples.items()
+                     if key in before['fields'] and before['fields'][key]['supported']}
         if available:
             out = save(available, confirm=True)
             assert out['status'] == 'saved', out['overridden']

@@ -6,6 +6,21 @@ from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+EXCLUDED_ROOTS = {'desktop', 'history', 'tui'}
+EXCLUDED_KEYS = {
+    'allow_login_shell', 'background_terminal_max_timeout', 'check_for_update_on_startup',
+    'disable_paste_burst', 'experimental_compact_prompt_file', 'experimental_use_unified_exec_tool',
+    'file_opener', 'hide_agent_reasoning', 'show_raw_agent_reasoning',
+    'shell_environment_policy', 'suppress_unstable_features_warning',
+}
+
+
+def excluded(path):
+    parts = path.split('.')
+    return any(
+        part in EXCLUDED_ROOTS or any(term in part.lower() for term in ('exec', 'shell', 'terminal'))
+        for part in parts
+    ) or parts[-1] in EXCLUDED_KEYS
 
 
 def index(schema):
@@ -13,6 +28,8 @@ def index(schema):
     entries = defaultdict(lambda: (set(), set()))
 
     def visit(path, node, refs=frozenset()):
+        if excluded(path):
+            return
         types, choices = entries[path]
         kind = node.get('type', [])
         types.update([kind] if isinstance(kind, str) else kind)
@@ -37,7 +54,7 @@ def index(schema):
     return [
         {'key': key, 'types': sorted(types - {'null'}), **({'choices': sorted(choices)} if choices else {})}
         for key, (types, choices) in sorted(entries.items())
-    ]
+    ], len([key for key in schema['properties'] if not excluded(key)])
 
 
 def main():
@@ -47,10 +64,12 @@ def main():
     args = parser.parse_args()
     schema = json.loads(args.schema.read_text(encoding='utf-8'))
     output = ROOT / 'mac' / 'config_reference.json'
-    lines = [json.dumps(row, ensure_ascii=False, separators=(',', ':')) for row in index(schema)]
-    header = json.dumps({'version': args.version, 'topLevelCount': len(schema['properties'])}, ensure_ascii=False)
+    entries, root_count = index(schema)
+    lines = [json.dumps(row, ensure_ascii=False, separators=(',', ':')) for row in entries]
+    header = json.dumps({'version': args.version, 'topLevelCount': root_count,
+                         'sourceTopLevelCount': len(schema['properties'])}, ensure_ascii=False)
     output.write_text(header[:-1] + ', "entries": [\n' + ',\n'.join(lines) + '\n]}\n', encoding='utf-8')
-    print(f'{len(schema["properties"])} top-level settings, {len(lines)} indexed paths')
+    print(f'{root_count}/{len(schema["properties"])} top-level settings, {len(lines)} indexed paths')
 
 
 if __name__ == '__main__':

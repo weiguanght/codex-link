@@ -128,33 +128,29 @@ class SettingsTests(unittest.TestCase):
     def test_typed_settings_write_and_reset_preserve_sibling_keys(self):
         self.rpc.local['memories'] = {'use_memories': True, 'extract_model': 'example'}
         out = self.save(**{'memories.use_memories': False, 'model_context_window': 100000,
-                           'history.persistence': 'none', 'include_environment_context': False})
+                           'include_environment_context': False})
         fields = out['settings']['fields']
         self.assertIs(fields['memories.use_memories']['effective'], False)
         self.assertIs(fields['include_environment_context']['value'], False)
         self.assertEqual(fields['model_context_window']['value'], 100000)
-        self.assertEqual(fields['history.persistence']['effective'], 'none')
         self.save(**{'memories.use_memories': None})
         self.assertEqual(self.rpc.local['memories'], {'extract_model': 'example'})
 
     def test_typed_settings_validation_and_runtime_support(self):
         for changes in ({'model_context_window': True}, {'model_context_window': 0},
                         {'model_post_turn_compact_threshold_percent': 101}, {'tool_output_token_limit': 1.5},
-                        {'include_environment_context': 'false'}, {'history.persistence': 'disabled'},
+                        {'include_environment_context': 'false'},
                         {'project_root_markers': ['.git', True]}, {'project_root_markers': ['']},
-                        {'tui.sidebar_width_percent': 100}):
+                        {'tui.animations': False}, {'desktop.custom': True},
+                        {'experimental_use_unified_exec_tool': True}, {'allow_login_shell': False}):
             with self.assertRaises(ValueError):
                 self.save(**changes)
         self.rpc.extra['features'] = {}
         self.assertFalse(self.service.read()['fields']['features.memories']['supported'])
         with self.assertRaises(SettingsError):
             self.save(**{'features.memories': True})
-        with self.assertRaises(ValueError):
-            self.save(allow_login_shell=False)
-        self.rpc.requirements['allowLoginShell'] = False
-        with self.assertRaises(SettingsError):
-            self.service.write({'revision': self.service.read()['revision'], 'changes': {'allow_login_shell': True},
-                                'confirmPermissions': True})
+        self.assertNotIn('allow_login_shell', FIELDS)
+        self.assertNotIn('background_terminal_max_timeout', FIELDS)
         self.assertNotIn('config/batchWrite', [method for method, _ in self.rpc.calls])
 
     def test_empty_string_list_and_reset_are_distinct(self):
@@ -332,6 +328,17 @@ class SettingsHTTPTests(unittest.TestCase):
         entries = {row['key']: row for row in catalog['entries']}
         roots = {key for key in entries if '.' not in key and '[' not in key}
         self.assertEqual(len(roots), catalog['topLevelCount'])
+        self.assertLess(catalog['topLevelCount'], catalog['sourceTopLevelCount'])
+        self.assertTrue({'desktop', 'history', 'tui'}.isdisjoint(roots))
+        self.assertFalse(any(
+            term in part.lower()
+            for key in entries for part in key.split('.')
+            for term in ('exec', 'shell', 'terminal')
+        ))
+        for key in ('allow_login_shell', 'background_terminal_max_timeout', 'file_opener',
+                    'hide_agent_reasoning', 'show_raw_agent_reasoning', 'shell_environment_policy',
+                    'experimental_use_unified_exec_tool'):
+            self.assertNotIn(key, entries)
         self.assertIn('mcp_servers.*.command', entries)
         self.assertIn('string', entries['model_providers.*.base_url']['types'])
         self.assertIn('agents.max_concurrent_threads_per_session', entries)

@@ -297,7 +297,8 @@ final class NativeSmoke: ObservableObject {
             try require(rejected, "Read-only history accepted a write")
             checks.append("typed history + server read-only guard")
             let configIndex = try await api.value("/api/codex-settings/reference")
-            try require(configIndex["topLevelCount"].int >= 103
+            try require(configIndex["sourceTopLevelCount"].int >= 103
+                        && configIndex["topLevelCount"].int < configIndex["sourceTopLevelCount"].int
                         && configIndex["entries"].array.contains(where: { $0["key"].string == "mcp_servers.*.command" }),
                         "Config reference entries failed to load")
             let settings = try await api.value("/api/codex-settings")

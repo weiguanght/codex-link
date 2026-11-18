@@ -26,7 +26,7 @@
     }],
     ['权限与沙盒', 'Permissions & sandbox', {
       approval_policy: ['审批策略', 'Approval policy'], approvals_reviewer: ['由谁审核', 'Approvals reviewer'],
-      sandbox_mode: ['执行沙盒', 'Execution sandbox'], allow_login_shell: ['允许使用登录 Shell', 'Allow login shell'],
+      sandbox_mode: ['执行沙盒', 'Execution sandbox'],
     }],
     ['指令与记忆', 'Instructions & memory', {
       developer_instructions: ['开发者指令', 'Developer instructions'], instructions: ['系统指令', 'System instructions'], compact_prompt: ['上下文压缩指令', 'Compaction prompt'],
@@ -58,25 +58,13 @@
       'agents.interrupt_message': ['记录子代理回合中断提示', 'Record interruptions of subagent turns'],
       'goals.max_goal_token_budget': ['目标预算上限（Token）', 'Max goal budget (tokens)'],
     }],
-    ['工具与终端', 'Tools & terminal', {
+    ['工具', 'Tools', {
       web_search: ['联网搜索', 'Web search'], tool_output_token_limit: ['工具输出上限（Token）', 'Tool output limit (tokens)'],
-      background_terminal_max_timeout: ['后台终端等待上限（毫秒）', 'Background terminal polling limit (ms)'],
-    }],
-    ['CLI 输入历史', 'CLI input history', {
-      'history.persistence': ['保存方式', 'Persistence'], 'history.max_bytes': ['历史文件上限（字节）', 'Max history size (bytes)'],
     }],
     ['项目与运行时', 'Projects & runtime', {
       project_root_markers: ['项目根目录标记', 'Project root markers'],
-      check_for_update_on_startup: ['启动时检查更新', 'Check for updates at startup'],
       thread_unload_delay_secs: ['空闲会话卸载延迟（秒）', 'Idle thread unload delay (seconds)'],
       'analytics.enabled': ['分析遥测', 'Analytics'], 'feedback.enabled': ['允许提交反馈', 'Allow feedback'],
-    }],
-    ['Codex CLI 界面', 'Codex CLI interface', {
-      'tui.animations': ['动画', 'Animations'], 'tui.show_tooltips': ['显示操作提示', 'Show tooltips'],
-      'tui.collapse_turn_details': ['折叠回合详情', 'Collapse turn details'],
-      'tui.sidebar_width_percent': ['侧栏宽度（%）', 'Sidebar width (%)'],
-      file_opener: ['文件链接打开方式', 'File link opener'], hide_agent_reasoning: ['隐藏推理摘要', 'Hide reasoning summaries'],
-      show_raw_agent_reasoning: ['显示原始推理', 'Show raw reasoning'],
     }],
   ];
   const labels = Object.assign({}, ...sections.map(([, , fields]) => fields));
@@ -132,7 +120,7 @@
     scopeLabel.append(scope); d.append(scopeLabel);
     const tabs = node('nav', 'settings-tabs'); tabs.setAttribute('aria-label', words('设置分类', 'Settings sections'));
     const panels = {};
-    for (const [key, label] of [['config', words('默认行为', 'Defaults')], ['skills', 'Skills'], ['mcp', 'MCP'], ['reference', words('全部配置项', 'Configuration index')], ['connections', words('账号与会话', 'Accounts & chat')]]) {
+    for (const [key, label] of [['config', words('默认行为', 'Defaults')], ['skills', 'Skills'], ['mcp', 'MCP'], ['reference', words('设置项索引', 'Settings index')], ['connections', words('账号与会话', 'Accounts & chat')]]) {
       tabs.append(button(label, () => showTab(key)));
       panels[key] = node('section', 'settings-panel'); panels[key].dataset.panel = key; panels[key].hidden = key !== tab;
     }
@@ -320,8 +308,8 @@
       search.setAttribute('aria-label', search.placeholder);
       const list = node('div', 'settings-reference-results');
       const version = node('p', 'settings-note', words(
-        'Codex ' + catalog.version + ' · ' + catalog.topLevelCount + ' 个一级键',
-        'Codex ' + catalog.version + ' · ' + catalog.topLevelCount + ' top-level keys'
+        'Codex ' + catalog.version + ' · ' + catalog.topLevelCount + ' 个适用一级键（源 schema 共 ' + catalog.sourceTopLevelCount + ' 个）',
+        'Codex ' + catalog.version + ' · ' + catalog.topLevelCount + ' applicable top-level keys (' + catalog.sourceTopLevelCount + ' in source schema)'
       ));
       function renderIndex() {
         const query = search.value.trim().toLowerCase();

@@ -636,6 +636,8 @@ final class NativeFlows: XCTestCase {
 
         app.buttons["native.home.settings"].tap()
         capture("Native settings root")
+        XCTAssertFalse(app.buttons["Codex CLI 界面"].exists)
+        XCTAssertTrue(app.buttons["设置项索引"].exists)
         app.buttons["模型与推理"].tap()
         let model = app.textFields["native.setting.model"]
         XCTAssertTrue(model.waitForExistence(timeout: 10))
