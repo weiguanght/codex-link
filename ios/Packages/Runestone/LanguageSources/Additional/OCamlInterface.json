@@ -1,0 +1,51 @@
+{
+  "title": "OCamlInterface",
+  "member": "ocamlInterface",
+  "symbol": "tree_sitter_ocaml_interface",
+  "repo": "https://github.com/tree-sitter/tree-sitter-ocaml",
+  "revision": "3b2e14e0697d405c9aa0beddfa09b71f45abc504",
+  "license": "MIT",
+  "licenses": [
+    "Licenses/Additional/OCamlInterface-LICENSE.txt"
+  ],
+  "source": "(** Public interface *)\nmodule Example : sig\n  type t\n  val count : t -> int\n  val name : string\nend\n(* outer (* nested *) comment *)\n",
+  "expected": [
+    [
+      "keyword",
+      "module"
+    ],
+    [
+      "keyword",
+      "sig"
+    ],
+    [
+      "keyword",
+      "val"
+    ],
+    [
+      "keyword",
+      "type"
+    ],
+    [
+      "comment",
+      "(* outer (* nested *) comment *)"
+    ]
+  ],
+  "forbidden": [],
+  "query_provenance": [
+    {
+      "repo": "https://github.com/tree-sitter/tree-sitter-ocaml",
+      "revision": "3b2e14e0697d405c9aa0beddfa09b71f45abc504",
+      "path": "queries/highlights.scm"
+    }
+  ],
+  "query_adaptations": [],
+  "notes": [
+    "Uses the same upstream revision, scanner fix, and query resources as OCaml; scanner include path adjusted for the SwiftPM layout."
+  ],
+  "query_files": {
+    "highlights": [
+      "OCaml/highlights"
+    ]
+  }
+}

@@ -1,67 +1,5 @@
 import SwiftUI
 import Runestone
-import TreeSitterBashRunestone
-import TreeSitterCRunestone
-import TreeSitterCSSRunestone
-import TreeSitterHTMLRunestone
-import TreeSitterJavaScriptRunestone
-import TreeSitterJSONRunestone
-import TreeSitterPythonRunestone
-import TreeSitterRustRunestone
-import TreeSitterSwiftRunestone
-import TreeSitterTOMLRunestone
-import TreeSitterTypeScriptRunestone
-import TreeSitterTSXRunestone
-import TreeSitterYAMLRunestone
-import TreeSitterMarkdownRunestone
-import TreeSitterMarkdownInlineRunestone
-
-enum NativeCodeLanguages {
-    static func name(_ hint: String) -> String {
-        let hint = hint.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let suffix = (hint as NSString).pathExtension
-        let token = suffix.isEmpty ? hint : suffix
-        switch token {
-        case "sh", "bash", "zsh", "shell": return "bash"
-        case "js", "jsx", "mjs", "cjs", "javascript": return "javascript"
-        case "ts", "typescript": return "typescript"
-        case "tsx": return "tsx"
-        case "py", "python": return "python"
-        case "rs", "rust": return "rust"
-        case "swift": return "swift"
-        case "json", "jsonl": return "json"
-        case "yml", "yaml": return "yaml"
-        case "toml": return "toml"
-        case "html", "htm": return "html"
-        case "css": return "css"
-        case "c", "h": return "c"
-        case "md", "markdown": return "markdown"
-        default: return "text"
-        }
-    }
-    // Language objects prepare their queries lazily. Each editor owns its language
-    // and parser state; no mutable parser is shared across background tasks.
-    static func language(_ hint: String) -> TreeSitterLanguage? {
-        switch name(hint) {
-        case "bash": return .bash
-        case "javascript": return .javaScript
-        case "typescript": return .typeScript
-        case "tsx": return .tsx
-        case "python": return .python
-        case "rust": return .rust
-        case "swift": return .swift
-        case "json": return .json
-        case "yaml": return .yaml
-        case "toml": return .toml
-        case "html": return .html
-        case "css": return .css
-        case "c": return .c
-        case "markdown": return .markdown
-        default: return nil
-        }
-    }
-}
-
 final class NativeCodeTheme: Runestone.Theme {
     let font = UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)
     var textColor: UIColor { .label }
@@ -78,14 +16,24 @@ final class NativeCodeTheme: Runestone.Theme {
     var markedTextBackgroundColor: UIColor { .systemBlue.withAlphaComponent(0.15) }
     func textColor(for name: String) -> UIColor? {
         let name = name.lowercased()
+        if name == "diff.plus" { return .systemGreen }
+        if name == "diff.minus" { return .systemRed }
+        if name == "diff.delta" { return .systemOrange }
+        if ["text.title", "text.uri", "text.reference"].contains(name) { return .systemBlue }
+        if name == "text.literal" { return .systemGreen }
         if name.contains("comment") { return .secondaryLabel }
         if name.contains("keyword") || name.contains("operator") { return .systemPurple }
-        if name.contains("string") || name.contains("character") { return .systemGreen }
-        if name.contains("number") || name.contains("constant") || name.contains("boolean") { return .systemOrange }
+        if name.contains("string") || name.contains("character") || name == "escape" { return .systemGreen }
+        if name.contains("number") || name.contains("constant") || name.contains("boolean") || name == "float" { return .systemOrange }
         if name.contains("function") || name.contains("method") { return .systemBlue }
-        if name.contains("type") || name.contains("constructor") || name.contains("tag") { return .systemTeal }
-        if name.contains("property") || name.contains("attribute") { return .systemIndigo }
+        if name.contains("type") || name.contains("constructor") || name.contains("tag") || name == "namespace" { return .systemTeal }
+        if name.contains("property") || name.contains("attribute") || name == "field" || name == "label" { return .systemIndigo }
         return nil
+    }
+    func fontTraits(for name: String) -> FontTraits {
+        if name == "text.strong" || name == "text.title" { return .bold }
+        if name == "text.emphasis" { return .italic }
+        return []
     }
 }
 
@@ -138,7 +86,7 @@ struct NativeCodeView: UIViewRepresentable {
             DispatchQueue.global(qos: .userInitiated).async { [weak self, weak view] in
                 let theme = NativeCodeTheme()
                 let state: TextViewState
-                if let grammar = NativeCodeLanguages.language(language) { state = TextViewState(text: text, theme: theme, language: grammar) }
+                if let grammar = NativeCodeLanguages.language(language) { state = TextViewState(text: text, theme: theme, language: grammar, languageProvider: NativeCodeLanguageProvider()) }
                 else { state = TextViewState(text: text, theme: theme) }
                 DispatchQueue.main.async {
                     guard let self, let view, self.generation == token else { return }
@@ -180,7 +128,7 @@ struct NativeCodeBlock: View {
 enum NativeSyntaxHighlight {
     static func text(_ text: String, language: String) -> AttributedString {
         guard !text.isEmpty, let grammar = NativeCodeLanguages.language(language) else { return AttributedString(text) }
-        let highlighter = Runestone.StringSyntaxHighlighter(theme: NativeCodeTheme(), language: grammar)
+        let highlighter = Runestone.StringSyntaxHighlighter(theme: NativeCodeTheme(), language: grammar, languageProvider: NativeCodeLanguageProvider())
         return (try? AttributedString(highlighter.syntaxHighlight(text), including: \.uiKit)) ?? AttributedString(text)
     }
 }

@@ -16,6 +16,7 @@ public extension TreeSitterIndentationScopes {
                 "switch_body"
             ],
             outdent: [
+                "jsx_closing_element",
                 "else",
                 "}",
                 "]"

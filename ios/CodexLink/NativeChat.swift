@@ -91,6 +91,7 @@ struct NativeChatView: View {
         .sheet(isPresented: $permissionSettings) { NavigationStack { NativeCodexSettings(api: chat.api, workspace: workspace, initialScope: "", permissionsOnly: true) } }
         .sheet(isPresented: $sendSettings) { NativeSendSettings(draft: chat.composer) }
         .sheet(isPresented: $chooseSendMode) { sendModeChooser }
+        .onChange(of: chat.running) { if !$0 { chooseSendMode = false } }
         .task(id: chat.session?.identity) {
             contextUsage = .null
             guard let session = chat.session else { return }
@@ -220,10 +221,9 @@ struct NativeChatView: View {
     private var sendModeChooser: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("本次发送方式").font(.headline).padding(.horizontal, 20).padding(.vertical, 16)
-            sendChoice("发送新消息", icon: "arrow.up.circle", mode: "send")
-            sendChoice("完成后发送", icon: "clock.arrow.circlepath", mode: "queue").disabled(!chat.running)
-            sendChoice("补充当前任务", icon: "arrow.turn.down.right", mode: "steer").disabled(!chat.running)
-        }.padding(.bottom, 16).presentationDetents([.height(252)]).presentationDragIndicator(.visible)
+            sendChoice("完成后发送", icon: "clock.arrow.circlepath", mode: "queue")
+            sendChoice("补充当前任务", icon: "arrow.turn.down.right", mode: "steer")
+        }.padding(.bottom, 16).presentationDetents([.height(204)]).presentationDragIndicator(.visible)
     }
     private func sendChoice(_ title: String, icon: String, mode: String) -> some View {
         Button { chooseSendMode = false; sendMessage(mode: mode) } label: {

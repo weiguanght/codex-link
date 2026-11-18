@@ -1,0 +1,67 @@
+{
+  "title": "Zig",
+  "member": "zig",
+  "symbol": "tree_sitter_zig",
+  "repo": "https://github.com/tree-sitter-grammars/tree-sitter-zig",
+  "revision": "eb7d58c2dc4fbeea4745019dee8df013034ae66b",
+  "license": "MIT",
+  "licenses": [
+    "Licenses/Additional/Zig-LICENSE.txt"
+  ],
+  "source": "//! Module docs\nconst std = @import(\"std\");\n// Entry point\npub fn main() void {\n    const count: u32 = 42;\n    const ratio: f64 = 3.14;\n    _ = count;\n    _ = ratio;\n}\n",
+  "expected": [
+    [
+      "keyword",
+      "fn"
+    ],
+    [
+      "function",
+      "main"
+    ],
+    [
+      "type.builtin",
+      "u32"
+    ],
+    [
+      "number",
+      "42"
+    ],
+    [
+      "number",
+      "3.14"
+    ],
+    [
+      "string",
+      "\"std\""
+    ],
+    [
+      "comment",
+      "// Entry point"
+    ],
+    [
+      "comment.documentation",
+      "//! Module docs"
+    ]
+  ],
+  "forbidden": [
+    [
+      "type",
+      "count"
+    ],
+    [
+      "constant",
+      "count"
+    ]
+  ],
+  "query_provenance": [
+    {
+      "repo": "https://github.com/tree-sitter-grammars/tree-sitter-zig",
+      "revision": "eb7d58c2dc4fbeea4745019dee8df013034ae66b",
+      "path": "queries/highlights.scm"
+    }
+  ],
+  "query_adaptations": [
+    "Capture names normalized to Runestone conventions; simple Lua character-class patterns translated to equivalent match? regular expressions; any-of? translated to anchored alternatives; editor-only spell-check and numeric priority annotations omitted."
+  ],
+  "notes": []
+}

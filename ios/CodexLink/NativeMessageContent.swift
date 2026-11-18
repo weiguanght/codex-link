@@ -270,35 +270,41 @@ struct NativeContextUsage {
 /// One recognizer owns the hold; releasing it must never also send a message.
 struct NativeSendButton: UIViewRepresentable {
     let enabled: Bool
+    let allowsModeSelection: Bool
     let onSend: () -> Void
     let onChooseMode: () -> Void
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeUIView(context: Context) -> UIButton {
         let button = UIButton(type: .custom)
         button.accessibilityLabel = "发送消息"
-        button.accessibilityHint = "轻点按默认方式发送，长按选择本次发送方式"
         button.accessibilityIdentifier = "native.send"
         button.layer.cornerRadius = 22
         button.setImage(UIImage(systemName: "arrow.up", withConfiguration: UIImage.SymbolConfiguration(pointSize: 19, weight: .medium)), for: .normal)
         button.addTarget(context.coordinator, action: #selector(Coordinator.tap), for: .touchUpInside)
         let hold = UILongPressGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.hold(_:)))
         hold.minimumPressDuration = 0.45; hold.cancelsTouchesInView = true
+        hold.isEnabled = enabled && allowsModeSelection
         button.addGestureRecognizer(hold)
-        button.accessibilityCustomActions = [UIAccessibilityCustomAction(name: "选择发送方式", target: context.coordinator, selector: #selector(Coordinator.choose))]
+        context.coordinator.holdRecognizer = hold
         return button
     }
     func updateUIView(_ button: UIButton, context: Context) {
         context.coordinator.owner = self
         button.isEnabled = enabled; button.alpha = enabled ? 1 : 0.3
+        context.coordinator.holdRecognizer?.isEnabled = enabled && allowsModeSelection
+        button.accessibilityHint = allowsModeSelection ? "轻点按默认方式发送，长按选择本次发送方式" : "轻点发送新消息"
+        button.accessibilityCustomActions = allowsModeSelection
+            ? [UIAccessibilityCustomAction(name: "选择发送方式", target: context.coordinator, selector: #selector(Coordinator.choose))] : nil
         button.backgroundColor = .label; button.tintColor = .systemBackground
     }
     final class Coordinator: NSObject {
         var owner: NativeSendButton
+        var holdRecognizer: UILongPressGestureRecognizer?
         init(_ owner: NativeSendButton) { self.owner = owner }
         @objc func tap() { if owner.enabled { owner.onSend() } }
         @objc func hold(_ gesture: UILongPressGestureRecognizer) {
-            if gesture.state == .began && owner.enabled { UIImpactFeedbackGenerator(style: .light).impactOccurred(); owner.onChooseMode() }
+            if gesture.state == .began && owner.enabled && owner.allowsModeSelection { UIImpactFeedbackGenerator(style: .light).impactOccurred(); owner.onChooseMode() }
         }
-        @objc func choose() -> Bool { guard owner.enabled else { return false }; owner.onChooseMode(); return true }
+        @objc func choose() -> Bool { guard owner.enabled && owner.allowsModeSelection else { return false }; owner.onChooseMode(); return true }
     }
 }

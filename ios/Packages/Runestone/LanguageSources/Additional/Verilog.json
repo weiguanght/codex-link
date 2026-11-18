@@ -1,0 +1,54 @@
+{
+  "title": "Verilog",
+  "member": "verilog",
+  "symbol": "tree_sitter_verilog",
+  "repo": "https://github.com/tree-sitter/tree-sitter-verilog",
+  "revision": "902031343056bc0b11f3e47b33f036a9cf59f58d",
+  "license": "MIT",
+  "licenses": [
+    "Licenses/Additional/Verilog-LICENSE.txt",
+    "Licenses/Folding/nvim-treesitter-APACHE-2.0.txt"
+  ],
+  "source": "// Combinational circuit\nmodule example(input wire a, output wire b);\n  parameter WIDTH = 8;\n  assign b = a;\n  initial $display(\"hello\");\nendmodule\n",
+  "expected": [
+    [
+      "keyword",
+      "module"
+    ],
+    [
+      "keyword",
+      "endmodule"
+    ],
+    [
+      "keyword",
+      "assign"
+    ],
+    [
+      "number",
+      "8"
+    ],
+    [
+      "string",
+      "\"hello\""
+    ],
+    [
+      "comment",
+      "// Combinational circuit"
+    ]
+  ],
+  "forbidden": [],
+  "query_provenance": [
+    {
+      "repo": "https://github.com/nvim-treesitter/nvim-treesitter",
+      "revision": "f8ab59861eed4a1c168505e3433462ed800f2bae",
+      "path": "queries/verilog/highlights.scm",
+      "license": "Apache-2.0"
+    }
+  ],
+  "query_adaptations": [
+    "Capture names normalized to Runestone conventions."
+  ],
+  "notes": [
+    "Uses pinned nvim-treesitter queries matching the bundled grammar. The supplied CodeEditLanguages highlight query references newer grammar nodes and is not compatible with its pinned parser."
+  ]
+}

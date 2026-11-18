@@ -31,8 +31,7 @@ def main():
     obj('main', f'isa = PBXGroup; sourceTree = "<group>"; children = ({identifier("sourcegroup")},{identifier("products")},);')
     obj('sources', f'isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ({",".join(builds)},); runOnlyForDeploymentPostprocessing = 0;')
     obj('resources', f'isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ({identifier("assetsbuild")},); runOnlyForDeploymentPostprocessing = 0;')
-    packages = ['Runestone'] + ['TreeSitter' + language + 'Runestone' for language in
-        ('Bash', 'C', 'CSS', 'HTML', 'JavaScript', 'JSON', 'Python', 'Rust', 'Swift', 'TOML', 'TypeScript', 'TSX', 'YAML', 'Markdown', 'MarkdownInline')]
+    packages = ['Runestone', 'RunestoneLanguageSupport']
     obj('editorpackage', 'isa = XCLocalSwiftPackageReference; relativePath = Packages/Runestone;')
     obj('mathpackage', 'isa = XCLocalSwiftPackageReference; relativePath = Packages/SwiftMath;')
     packages.append('SwiftMath')

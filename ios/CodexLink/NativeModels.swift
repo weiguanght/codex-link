@@ -542,7 +542,7 @@ final class ChatModel: ObservableObject {
     func send(mode: String? = nil) async {
         guard canSend, let target = session else { return }
         let apiGeneration = api.generation
-        let requestedMode = mode ?? draft.sendMode
+        let requestedMode = mode ?? NativeSendMode.followUp(draft.sendMode)
         guard ["send", "queue", "steer"].contains(requestedMode) else { return }
         let effectiveMode = NativeSendMode.resolve(requestedMode, running: running)
         sending.insert(target.identity); error = ""; notice = ""
@@ -635,6 +635,7 @@ final class ChatModel: ObservableObject {
 }
 
 enum NativeSendMode {
+    static func followUp(_ value: String?) -> String { value == "steer" ? "steer" : "queue" }
     static func resolve(_ requested: String, running: Bool) -> String {
         !running && ["steer", "queue"].contains(requested) ? "send" : requested
     }

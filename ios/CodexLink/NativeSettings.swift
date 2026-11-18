@@ -5,7 +5,7 @@ struct NativeAppSettings: View {
     @ObservedObject var workspace: WorkspaceModel
     @Environment(\.dismiss) private var dismiss
     @AppStorage("native.appearance") private var appearance = "system"
-    @AppStorage("native.followUpBehavior") private var followUpBehavior = "send"
+    @AppStorage("native.followUpBehavior") private var followUpBehavior = "queue"
     @AppStorage("native.commandLineWrapping") private var commandLineWrapping = true
     @AppStorage("native.diffLineWrapping") private var diffLineWrapping = true
     @State private var forget = false
@@ -30,8 +30,7 @@ struct NativeAppSettings: View {
                 Picker("主题", selection: $appearance) { Text("跟随系统").tag("system"); Text("浅色").tag("light"); Text("深色").tag("dark") }
             }
             Section {
-                Picker("后续消息默认方式", selection: $followUpBehavior) {
-                    Text("发送新消息").tag("send")
+                Picker("后续消息默认方式", selection: Binding(get: { NativeSendMode.followUp(followUpBehavior) }, set: { followUpBehavior = $0 })) {
                     Text("完成后发送").tag("queue")
                     Text("补充当前任务").tag("steer")
                 }
@@ -59,6 +58,7 @@ struct NativeAppSettings: View {
             }
         }
         .navigationTitle("设置").navigationBarTitleDisplayMode(.inline)
+        .onAppear { followUpBehavior = NativeSendMode.followUp(followUpBehavior) }
         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
         .confirmationDialog("忘记后需要回到局域网重新配对", isPresented: $forget, titleVisibility: .visible) {
             Button("忘记此 Mac", role: .destructive) { connection.forget(); dismiss() }
@@ -221,12 +221,10 @@ struct NativeAdvancedSettings: View {
                     .font(.footnote).foregroundStyle(.secondary)
             }
             Section("TOML") {
-                TextEditor(text: $content)
-                    .font(.system(size: 13, design: .monospaced))
+                NativeCodeView(text: $content, language: "toml", editable: true, wrapsLines: false,
+                               identifier: "native.settings.advanced.editor")
                     .frame(minHeight: 380)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .accessibilityIdentifier("native.settings.advanced.editor")
+                    .listRowInsets(EdgeInsets())
             }
             Section {
                 NativeNotice(text: error, isError: true)

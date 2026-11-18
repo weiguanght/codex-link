@@ -51,7 +51,7 @@ struct NativeChatComposer: View {
                     else if chat.running && draft.value.text.isEmpty && draft.value.attachments.isEmpty {
                         NativeIconButton(symbol: "stop.fill", label: "停止任务", filled: true) { perform { try await chat.stop() } }.disabled(!chat.connected)
                     } else {
-                        NativeSendButton(enabled: chat.canSend, onSend: { onSend() }, onChooseMode: { focus.wrappedValue = false; onChooseMode() })
+                        NativeSendButton(enabled: chat.canSend, allowsModeSelection: chat.running, onSend: { onSend() }, onChooseMode: { focus.wrappedValue = false; onChooseMode() })
                             .frame(width: 44, height: 44)
                     }
                 }.padding(7).background(Color.linkSurface, in: RoundedRectangle(cornerRadius: 29))
@@ -67,18 +67,20 @@ struct NativeChatComposer: View {
 struct NativeSendSettings: View {
     @ObservedObject var draft: NativeComposerDraft
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("native.followUpBehavior") private var defaultSendMode = "send"
+    @AppStorage("native.followUpBehavior") private var defaultSendMode = "queue"
     var body: some View {
         NavigationStack {
             Form {
                 Picker("工作模式", selection: $draft.value.workMode) { Text("普通").tag("default"); Text("计划").tag("plan") }
-                Picker("默认发送方式", selection: $draft.value.sendMode) {
-                    Text("发送新消息").tag("send"); Text("完成后发送").tag("queue"); Text("补充当前任务").tag("steer")
+                Picker("默认发送方式", selection: Binding(get: { NativeSendMode.followUp(draft.value.sendMode) }, set: {
+                    draft.value.sendMode = $0; defaultSendMode = $0
+                })) {
+                    Text("完成后发送").tag("queue"); Text("补充当前任务").tag("steer")
                 }.accessibilityIdentifier("native.send.defaultMode")
                 Text("任务执行时使用所选方式；任务结束后直接发送新消息。长按发送按钮可仅为本次消息选择方式。").font(.footnote).foregroundStyle(.secondary)
             }.navigationTitle("消息发送设置").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
-                .onChange(of: draft.value.sendMode) { defaultSendMode = $0 }
+                .onAppear { draft.value.sendMode = NativeSendMode.followUp(draft.value.sendMode); defaultSendMode = NativeSendMode.followUp(defaultSendMode) }
         }
     }
 }

@@ -21,6 +21,7 @@ struct NativeChatRenderMetricsView: View {
     }
 }
 
+#if !LINK_SYNTAX_ONLY
 @main
 struct SmokeMain: App {
     @StateObject private var smoke = NativeSmoke()
@@ -379,14 +380,10 @@ final class NativeSmoke: ObservableObject {
                 try require(conflict, "File save overwrote an externally changed revision")
                 _ = try await api.value(filePath, body: json(["path": string("README.txt"), "revision": string(edited.revision!), "text": string(original.text)]))
                 checks.append("workspace edit + save/readback + stale-revision conflict + original restored")
-                for hint in ["file.swift", "file.rs", "script.py", "script.sh", "file.js", "file.ts", "file.tsx", "file.json", "file.yaml", "file.toml", "file.css", "file.html", "file.c", "file.md"] {
-                    guard let grammar = NativeCodeLanguages.language(hint) else { throw LinkError.message("Missing grammar: " + hint) }
-                    try require(grammar.highlightsQuery != nil, "Missing highlights: " + hint)
-                    grammar.prepare()
-                }
+                let syntaxCount = try NativeSyntaxSmoke.verify()
                 let terminal = NativeTerminalText.attributed("\u{1b}[31merror\u{1b}[0m ok \u{1b}]8;;https://example.invalid\u{7}link\u{1b}]8;;\u{7}")
                 try require(String(terminal.characters) == "error ok link" && terminal.runs.contains { $0.foregroundColor == .red } && terminal.runs.allSatisfy { $0.link == nil }, "Terminal output style or control stripping failed")
-                checks.append("14 Runestone grammar highlight queries + ANSI color/reset + OSC controls removed")
+                checks.append("\(syntaxCount) Runestone language fixtures + filename detection + embedded JavaScript + ANSI color/reset + OSC controls removed")
                 await browser.loadChanges(source: "unstaged")
                 try require(browser.changes?.files.contains { $0.path == "README.txt" && $0.untracked } == true, "Untracked file missing")
                 await browser.open("Sources/example.swift", diffSource: "unstaged")
@@ -451,12 +448,12 @@ final class NativeSmoke: ObservableObject {
                 try require(try reopenedStore.load(scope: "synthetic-pairing", identity: desktop.identity) == nil, "Confirmed send left a recoverable draft")
                 let after = try await api.value("/api/sessions/\(desktop.id)/catalog")
                 try require(after["sendCount"].int == 2 && after["lastAttemptCount"].int == 2, "Retry changed idempotency key")
-                resumed.draft.sendMode = "send"
+                resumed.draft.sendMode = "steer"
                 resumed.meta = json(resumed.meta.object.merging(["status": string("active")]) { _, new in new })
                 resumed.draft.text = "Synthetic one-off queued message"
                 await resumed.send(mode: "queue")
                 let overrideMode = try await api.value("/api/sessions/\(desktop.id)/catalog")
-                try require(overrideMode["lastSendMode"].string == "queue" && resumed.draft.sendMode == "send", "One-off send changed the default or ignored the chosen mode")
+                try require(overrideMode["lastSendMode"].string == "queue" && resumed.draft.sendMode == "steer", "One-off send changed the default or ignored the chosen mode")
                 resumed.meta = json(resumed.meta.object.merging(["status": string("idle")]) { _, new in new })
                 resumed.draft.text = "Synthetic default send after override"
                 await resumed.send()
@@ -481,7 +478,7 @@ final class NativeSmoke: ObservableObject {
                 await resumed.send()
                 let retriedSteer = try await api.value("/api/sessions/\(desktop.id)/catalog")
                 try require(retriedSteer["lastSendMode"].string == "steer" && retriedSteer["lastAttemptCount"].int == 2 && resumed.draft.text.isEmpty, "Task completion changed an unconfirmed steering request instead of retrying its ID")
-                resumed.draft.sendMode = "send"
+                resumed.draft.sendMode = "queue"
                 try await resumed.stop()
                 if let request = resumed.requests.first { try await resumed.respond(request, response: json(["decision": string("decline")])) }
                 resumed.draft.text = "Forget while a save is pending"
@@ -548,4 +545,5 @@ final class NativeSmoke: ObservableObject {
         try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: folder.appendingPathComponent("smoke.json"))
     }
 }
+#endif
 #endif

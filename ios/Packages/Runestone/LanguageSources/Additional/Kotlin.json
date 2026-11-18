@@ -1,0 +1,72 @@
+{
+  "title": "Kotlin",
+  "member": "kotlin",
+  "symbol": "tree_sitter_kotlin",
+  "repo": "https://github.com/fwcd/tree-sitter-kotlin",
+  "revision": "76f53c48d29e8588934fb55b0240d7bdfe00bfe5",
+  "license": "MIT",
+  "licenses": [
+    "Licenses/Additional/Kotlin-LICENSE.txt",
+    "Licenses/Folding/nvim-treesitter-APACHE-2.0.txt"
+  ],
+  "source": "package example\nclass Stringish\n// Greeting\nfun greet(name: String): String {\n  val count: Int = 42\n  println(name)\n  val message = greet(name)\n  val custom: Stringish? = null\n  return \"hello\"\n}\n",
+  "expected": [
+    [
+      "keyword",
+      "fun"
+    ],
+    [
+      "function",
+      "greet"
+    ],
+    [
+      "type.builtin",
+      "String"
+    ],
+    [
+      "type.builtin",
+      "Int"
+    ],
+    [
+      "number",
+      "42"
+    ],
+    [
+      "function.builtin",
+      "println"
+    ],
+    [
+      "string",
+      "\"hello\""
+    ],
+    [
+      "comment",
+      "// Greeting"
+    ],
+    [
+      "type",
+      "Stringish"
+    ]
+  ],
+  "forbidden": [
+    [
+      "function.builtin",
+      "greet"
+    ],
+    [
+      "type.builtin",
+      "Stringish"
+    ]
+  ],
+  "query_provenance": [
+    {
+      "repo": "https://github.com/fwcd/tree-sitter-kotlin",
+      "revision": "76f53c48d29e8588934fb55b0240d7bdfe00bfe5",
+      "path": "queries/highlights.scm"
+    }
+  ],
+  "query_adaptations": [
+    "Capture names normalized to Runestone conventions; any-of? predicates translated to anchored match? alternatives."
+  ],
+  "notes": []
+}

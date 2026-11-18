@@ -1,0 +1,85 @@
+{
+  "title": "GoMod",
+  "member": "goMod",
+  "symbol": "tree_sitter_gomod",
+  "repo": "https://github.com/camdencheek/tree-sitter-go-mod",
+  "revision": "bbe2fe3be4b87e06a613e685250f473d2267f430",
+  "license": "MIT",
+  "licenses": [
+    "Licenses/Additional/GoMod-LICENSE.txt"
+  ],
+  "source": "module example.com/demo\n\ngo 1.22\n\n// Dependencies\nrequire (\n  example.com/alpha v1.2.3\n  example.com/beta v2.0.0 // indirect\n)\nreplace example.com/alpha => ../alpha\n",
+  "expected": [
+    [
+      "keyword",
+      "module"
+    ],
+    [
+      "keyword",
+      "require"
+    ],
+    [
+      "keyword",
+      "replace"
+    ],
+    [
+      "operator",
+      "=>"
+    ],
+    [
+      "string",
+      "v1.2.3"
+    ],
+    [
+      "comment",
+      "// Dependencies"
+    ]
+  ],
+  "forbidden": [],
+  "query_provenance": [
+    {
+      "repo": "https://github.com/camdencheek/tree-sitter-go-mod",
+      "revision": "bbe2fe3be4b87e06a613e685250f473d2267f430",
+      "path": "queries/highlights.scm"
+    }
+  ],
+  "query_adaptations": [
+    "Capture names normalized to Runestone conventions."
+  ],
+  "notes": [],
+  "source_adaptations": [
+    "Set ts_symbol_metadata[anon_sym_LF].visible to false so Runestone can inspect an opening parenthesis at a group boundary. This hides anonymous newline AST nodes; named nodes, lexing, and parse tables retain the upstream definitions."
+  ],
+  "additional_cases": [
+    {
+      "source": "module example.com/demo\r\ngo 1.22\r\nrequire example.com/one v1.0.0\r\nexclude (\r\n  example.com/two v2.0.0\r\n)\r\nreplace (\r\n  example.com/one => ../one\r\n)\r\nretract (\r\n  v0.1.0\r\n)\r\n",
+      "expected": [
+        [
+          "keyword",
+          "require"
+        ],
+        [
+          "keyword",
+          "exclude"
+        ],
+        [
+          "keyword",
+          "replace"
+        ],
+        [
+          "keyword",
+          "retract"
+        ],
+        [
+          "string",
+          "v2.0.0"
+        ],
+        [
+          "string",
+          "v0.1.0"
+        ]
+      ],
+      "forbidden": []
+    }
+  ]
+}

@@ -11,7 +11,7 @@ struct ChatDraft {
     var text = ""
     var attachments: [PendingAttachment] = []
     var workMode = "default"
-    var sendMode = UserDefaults.standard.string(forKey: "native.followUpBehavior") ?? "send"
+    var sendMode = NativeSendMode.followUp(UserDefaults.standard.string(forKey: "native.followUpBehavior"))
     var skills: [String] = []
     var attempt: DraftSendAttempt?
     var recoveryNotice = ""
@@ -65,7 +65,7 @@ final class DraftStore {
         let value = try JSONDecoder().decode(Snapshot.self, from: Data(contentsOf: url))
         guard value.version == 1 else { throw LinkError.message("本机草稿版本暂不支持") }
         var draft = ChatDraft()
-        draft.text = value.text; draft.workMode = value.workMode; draft.sendMode = value.sendMode
+        draft.text = value.text; draft.workMode = value.workMode; draft.sendMode = NativeSendMode.followUp(value.sendMode)
         draft.skills = value.skills; draft.attempt = value.attempt
         var messages = ["已恢复此设备上的输入草稿。"]
         if !value.omittedAttachmentNames.isEmpty { messages.append("请重新选择附件：" + value.omittedAttachmentNames.joined(separator: "、")) }

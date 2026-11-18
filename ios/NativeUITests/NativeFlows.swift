@@ -111,7 +111,7 @@ final class NativeFlows: XCTestCase {
         capture("Five-line user message and centered copy confirmation")
     }
 
-    func testChatMenuContextAndSendHold() throws {
+    func testChatMenuContextAndIdleSend() throws {
         continueAfterFailure = false
         let app = XCUIApplication(bundleIdentifier: "local.codex.link")
         for key in ["PORT", "PIN", "ID"] {
@@ -147,19 +147,11 @@ final class NativeFlows: XCTestCase {
         app.buttons["native.send.settings"].tap()
         XCTAssertTrue(app.navigationBars["消息发送设置"].waitForExistence(timeout: 5))
         app.buttons["完成"].tap()
-        field.tap(); field.typeText("Synthetic long press send")
+        field.tap(); field.typeText("Synthetic idle tap send")
         let send = app.buttons["native.send"]
-        send.press(forDuration: 0.7)
-        XCTAssertTrue(app.buttons["native.send.once.queue"].waitForExistence(timeout: 5))
-        capture("One-off sending options from a long press")
-        let chooserHeader = app.staticTexts["本次发送方式"]
-        let header = chooserHeader.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        header.press(forDuration: 0.05, thenDragTo: header.withOffset(CGVector(dx: 0, dy: 180)))
-        XCTAssertTrue(field.waitForExistence(timeout: 5))
-        XCTAssertTrue((field.value as? String ?? "").contains("Synthetic long press send"), "Holding or dismissing the send chooser submitted the draft")
-        send.press(forDuration: 0.7)
-        XCTAssertTrue(app.buttons["native.send.once.queue"].waitForExistence(timeout: 5))
-        app.buttons["native.send.once.queue"].tap()
+        XCTAssertFalse(app.buttons["native.send.once.queue"].exists)
+        XCTAssertFalse(app.buttons["native.send.once.steer"].exists)
+        send.tap()
         expectation(for: emptyDraft, evaluatedWith: field)
         waitForExpectations(timeout: 8)
         field.tap(); field.typeText("Synthetic default tap send")

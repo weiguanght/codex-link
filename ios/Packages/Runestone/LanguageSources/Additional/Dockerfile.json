@@ -1,0 +1,46 @@
+{
+  "title": "Dockerfile",
+  "member": "dockerfile",
+  "symbol": "tree_sitter_dockerfile",
+  "repo": "https://github.com/camdencheek/tree-sitter-dockerfile",
+  "revision": "33e22c33bcdbfc33d42806ee84cfd0b1248cc392",
+  "license": "MIT",
+  "licenses": [
+    "Licenses/Additional/Dockerfile-LICENSE.txt"
+  ],
+  "source": "FROM alpine:3.20 AS base\n# Build image\nENV APP_HOME=\"/app\"\nWORKDIR /app\nRUN echo \"hello\"\nCMD [\"echo\", \"ready\"]\n",
+  "expected": [
+    [
+      "keyword",
+      "FROM"
+    ],
+    [
+      "keyword",
+      "RUN"
+    ],
+    [
+      "keyword",
+      "CMD"
+    ],
+    [
+      "comment",
+      "# Build image"
+    ],
+    [
+      "string",
+      "\"ready\""
+    ]
+  ],
+  "forbidden": [],
+  "query_provenance": [
+    {
+      "repo": "https://github.com/camdencheek/tree-sitter-dockerfile",
+      "revision": "33e22c33bcdbfc33d42806ee84cfd0b1248cc392",
+      "path": "queries/highlights.scm"
+    }
+  ],
+  "query_adaptations": [
+    "Capture names normalized to Runestone conventions."
+  ],
+  "notes": []
+}

@@ -2,17 +2,19 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 mkdir -p "$ROOT/build"
+SMOKE_FLAGS="LINK_SMOKE"
+if [ "${LINK_SYNTAX_ONLY:-0}" = "1" ]; then SMOKE_FLAGS="$SMOKE_FLAGS LINK_SYNTAX_ONLY"; fi
 python3 "$ROOT/scripts/make-icon.py"
 python3 "$ROOT/scripts/generate-project.py"
 if [ "${LINK_UI_TEST:-0}" = "1" ]; then
   xcodebuild -project "$ROOT/ios/codex-link.xcodeproj" -scheme codex-link \
     -configuration Debug -sdk iphonesimulator -derivedDataPath "$ROOT/build/native-ui" \
-    SWIFT_ACTIVE_COMPILATION_CONDITIONS=LINK_SMOKE CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- \
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS="$SMOKE_FLAGS" CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- \
     build-for-testing > "$ROOT/build/native-ui-build.log" 2>&1
 fi
 xcodebuild -project "$ROOT/ios/codex-link.xcodeproj" -target codex-link \
   -configuration Debug -sdk iphonesimulator ARCHS="$(uname -m)" ONLY_ACTIVE_ARCH=YES \
-  SWIFT_ACTIVE_COMPILATION_CONDITIONS=LINK_SMOKE \
+  SWIFT_ACTIVE_COMPILATION_CONDITIONS="$SMOKE_FLAGS" \
   CONFIGURATION_BUILD_DIR="$ROOT/build/smoke-simulator" \
   SYMROOT="$ROOT/build/smoke-products" OBJROOT="$ROOT/build/smoke-intermediates" \
   CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- \
