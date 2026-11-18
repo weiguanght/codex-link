@@ -410,7 +410,10 @@ struct NativeNewChat: View {
     @State private var attempt: (content: String, id: String)?
     private var selectedProject: LinkProject? { projects.first { $0.key == project } }
     private var canOverrideSettings: Bool { selectedProject?.host == nil || selectedProject?.host == "local" }
-    private var defaultModelID: String { settings["fields"]["model"]["effective"].string }
+    private var defaultModelID: String {
+        let configured = settings["fields"]["model"]["effective"].string
+        return configured.isEmpty ? models.first { $0["isDefault"].bool }?["id"].string ?? "" : configured
+    }
     private var configuredEffort: String { settings["fields"]["model_reasoning_effort"]["effective"].string }
     private var defaultModelLabel: String { defaultModelID.isEmpty ? "Codex 默认模型" : "Codex 默认模型（\(defaultModelID)）" }
     private var defaultEffortLabel: String { configuredEffort.isEmpty ? "Codex 默认" : "Codex 默认（\(configuredEffort)）" }
@@ -483,7 +486,7 @@ struct NativeNewChat: View {
                 guard !selected.isEmpty else { effort = ""; return }
                 guard let row = models.first(where: { $0["id"].string == selected }) else { effort = ""; return }
                 let options = row["efforts"].array.map(\.string)
-                let preferred = selected == defaultModelID ? configuredEffort : row["defaultEffort"].string
+                let preferred = options.contains(configuredEffort) ? configuredEffort : row["defaultEffort"].string
                 effort = options.contains(preferred) ? preferred : ""
             }
         }

@@ -335,7 +335,8 @@ class CodexSettings:
                 for row in result.get('data', []):
                     rows.append({'id': text(row.get('model') or row.get('id'), 200), 'name': text(row.get('displayName') or row.get('model') or row.get('id'), 200),
                                  'efforts': [text(e.get('reasoningEffort'), 80) for e in row.get('supportedReasoningEfforts', [])[:50] if isinstance(e, dict)],
-                                 'defaultEffort': text(row.get('defaultReasoningEffort'), 80)})
+                                 'defaultEffort': text(row.get('defaultReasoningEffort'), 80),
+                                 'isDefault': row.get('isDefault') is True})
                 cursor = result.get('nextCursor')
                 if not cursor or cursor in cursors:
                     break

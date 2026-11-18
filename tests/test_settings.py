@@ -64,7 +64,7 @@ class FakeRuntime:
                     if e['value'] is None: self.local.pop(e['keyPath'], None)
                     else: self.local[e['keyPath']] = e['value']
             return {'status': 'okOverridden' if self.overrides else 'ok', 'filePath': str(self.home / 'config.toml'), 'version': digest(self.local), 'overriddenMetadata': {'secret': 'SYNTHETIC_SECRET'}}
-        if method == 'model/list': return {'data': [{'id': 'internal', 'model': 'test-model', 'displayName': 'Test model', 'token': 'SYNTHETIC_SECRET'}], 'nextCursor': None}
+        if method == 'model/list': return {'data': [{'id': 'internal', 'model': 'test-model', 'displayName': 'Test model', 'isDefault': True, 'token': 'SYNTHETIC_SECRET'}], 'nextCursor': None}
         if method == 'skills/list': return {'data': [{'cwd': params['cwds'][0], 'skills': [{'path': str(self.home / 'skills/demo/SKILL.md'), 'name': 'Demo', 'enabled': self.skill_enabled, 'scope': 'user', 'description': 'A demo', 'env': 'SYNTHETIC_SECRET'}]}]}
         if method == 'skills/config/write':
             self.skill_enabled = params['enabled']; self.local['skills'] = {'test_enabled': self.skill_enabled}; return {'effectiveEnabled': self.skill_enabled}
@@ -217,6 +217,7 @@ class SettingsTests(unittest.TestCase):
         for value in (self.service.models(), self.service.mcp(), self.service.skills('local|demo')):
             self.assertNotIn('SYNTHETIC_SECRET', json.dumps(value))
         mcp = self.service.mcp(); self.assertTrue(mcp['readOnly']); self.assertEqual(mcp['servers'][0]['toolCount'], 1)
+        self.assertTrue(self.service.models()['models'][0]['isDefault'])
 
     def test_skill_toggle_validates_revision_path_and_readback(self):
         skills = self.service.skills(); body = {'revision': skills['revision'], 'path': skills['skills'][0]['path'], 'enabled': False, 'confirmed': True}
