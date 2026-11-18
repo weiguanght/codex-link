@@ -21,6 +21,7 @@ struct NativeLibraryView: View {
     @State private var batchConfirm = false
     var body: some View {
         libraryList
+        .nativeCopyFeedback()
         .listStyle(.plain).scrollDismissesKeyboard(.interactively)
         .searchable(text: $model.query, prompt: "搜索对话和项目")
         .navigationTitle("Codex Link").navigationBarTitleDisplayMode(.large)
@@ -146,7 +147,7 @@ struct NativeLibraryView: View {
                     Button("查看 AGENTS.md", systemImage: "doc.text") { perform { let result = try await model.api.value("/api/workspace/agents", query: ["project": project.key]); agents = result["text"].string; showAgents = true } }
                 }
             } else { Button("添加此项目", systemImage: "folder.badge.plus") { renameProject = project } }
-            Button("复制目录", systemImage: "doc.on.doc") { UIPasteboard.general.string = project.cwd }
+            Button("复制目录", systemImage: "doc.on.doc") { NativeClipboard.copy(project.cwd) }
         } label: { Image(systemName: "ellipsis").frame(width: 38, height: 38).contentShape(Rectangle()) }.accessibilityLabel(project.name + "的操作")
     }
     private func perform(_ action: @escaping () async throws -> Void) { Task { do { try await action() } catch { self.error = error.localizedDescription } } }
@@ -184,11 +185,11 @@ struct NativeSessionActions: View {
                 var components = URLComponents()
                 components.scheme = "codex"; components.host = "threads"; components.path = "/" + row.id
                 if row.host != "local" { components.queryItems = [URLQueryItem(name: "hostId", value: row.host)] }
-                UIPasteboard.general.string = components.url?.absoluteString
+                NativeClipboard.copy(components.url?.absoluteString ?? "")
             }.keyboardShortcut("l", modifiers: [.option, .command])
-            Button("复制为 Markdown") { perform { UIPasteboard.general.string = try await model.copyMarkdown(row) } }
-            Button("复制工作目录") { UIPasteboard.general.string = row.cwd ?? "" }.keyboardShortcut("c", modifiers: [.shift, .command])
-            Button("复制会话 ID") { UIPasteboard.general.string = row.id }
+            Button("复制为 Markdown") { perform { NativeClipboard.copy(try await model.copyMarkdown(row)) } }
+            Button("复制工作目录") { NativeClipboard.copy(row.cwd ?? "") }.keyboardShortcut("c", modifiers: [.shift, .command])
+            Button("复制会话 ID") { NativeClipboard.copy(row.id) }
         }
         if row.readOnly != true && row.host == "local" {
             Button(row.archived == true ? "取消归档" : "归档", systemImage: "archivebox", action: onArchive).keyboardShortcut("a", modifiers: [.shift, .command])
@@ -397,47 +398,110 @@ struct NativeNewChat: View {
     @State private var projects: [LinkProject] = []
     @State private var project = ""
     @State private var title = ""
+    @State private var modelID = ""
+    @State private var effort = ""
+    @State private var approvalPolicy = ""
+    @State private var sandboxMode = ""
+    @State private var models: [JSONValue] = []
+    @State private var settings: JSONValue = .null
     @State private var newProject = false
     @State private var busy = false
     @State private var error = ""
     @State private var attempt: (content: String, id: String)?
+    private var selectedProject: LinkProject? { projects.first { $0.key == project } }
+    private var canOverrideSettings: Bool { selectedProject?.host == nil || selectedProject?.host == "local" }
+    private var defaultModelID: String { settings["fields"]["model"]["effective"].string }
+    private var effortModelID: String { modelID.isEmpty ? defaultModelID : modelID }
+    private var availableEfforts: [String] {
+        models.first { $0["id"].string == effortModelID }?["efforts"].array.map(\.string) ?? []
+    }
+    private var approvalChoices: [String] { settings["fields"]["approval_policy"]["choices"].array.map(\.string) }
+    private var sandboxChoices: [String] { settings["fields"]["sandbox_mode"]["choices"].array.map(\.string) }
     var body: some View {
         NavigationStack {
             Form {
                 Section("项目") {
-                    Picker("工作目录", selection: $project) { Text("选择项目").tag(""); ForEach(projects) { Text($0.name).tag($0.key) } }
+                    Picker("工作目录", selection: $project) { Text("不选择项目").tag(""); ForEach(projects) { Text($0.name).tag($0.key) } }.accessibilityIdentifier("native.chat.project")
                     if let chosen = projects.first(where: { $0.key == project }) { Text(chosen.cwd).font(.caption).foregroundStyle(.secondary) }
+                    else { Text("将在默认目录中创建会话").font(.caption).foregroundStyle(.secondary) }
                     Button("新建项目", systemImage: "folder.badge.plus") { newProject = true }
                 }
-                if initialPrompt.isEmpty {
-                    Section("对话标题") { TextField("新对话", text: $title).accessibilityIdentifier("native.chat.title") }
+                Section("会话名称") {
+                    TextField("留空由 Codex 自动命名", text: $title).accessibilityIdentifier("native.chat.title")
+                    if !initialPrompt.isEmpty { Text(initialPrompt).font(.caption).foregroundStyle(.secondary).lineLimit(3).accessibilityIdentifier("native.chat.initialPrompt") }
+                }
+                if canOverrideSettings {
+                    Section("模型") {
+                        Picker("模型", selection: $modelID) {
+                            Text("Codex 默认模型").tag("")
+                            ForEach(Array(models.enumerated()), id: \.offset) { _, row in
+                                Text(row["name"].string.isEmpty ? row["id"].string : row["name"].string).tag(row["id"].string)
+                            }
+                        }.pickerStyle(.menu).accessibilityIdentifier("native.chat.model")
+                        Picker("推理强度", selection: $effort) {
+                            Text("Codex 默认").tag("")
+                            ForEach(availableEfforts, id: \.self) { Text($0).tag($0) }
+                        }.pickerStyle(.menu).disabled(availableEfforts.isEmpty).accessibilityIdentifier("native.chat.effort")
+                    }
+                    Section("权限") {
+                        Picker("审批策略", selection: $approvalPolicy) {
+                            Text("Codex 默认").tag("")
+                            ForEach(approvalChoices, id: \.self) { Text(approvalLabel($0)).tag($0) }
+                        }.pickerStyle(.menu).accessibilityIdentifier("native.chat.approval")
+                        Picker("执行沙盒", selection: $sandboxMode) {
+                            Text("Codex 默认").tag("")
+                            ForEach(sandboxChoices, id: \.self) { Text(sandboxLabel($0)).tag($0) }
+                        }.pickerStyle(.menu).accessibilityIdentifier("native.chat.sandbox")
+                    }
                 } else {
-                    Section("新任务") { Text(initialPrompt).textSelection(.enabled).accessibilityIdentifier("native.chat.initialPrompt") }
+                    Section("模型与权限") { Text("远程项目使用该主机的默认设置。") .font(.footnote).foregroundStyle(.secondary) }
                 }
                 NativeNotice(text: error, isError: true)
             }
             .navigationTitle("新建对话").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() }.disabled(busy) }; ToolbarItem(placement: .confirmationAction) { Button { Task { await create() } } label: { if busy { ProgressView() } else { Text(initialPrompt.isEmpty ? "创建" : "开始任务").bold() } }.disabled(busy || project.isEmpty).accessibilityIdentifier("native.chat.create") } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() }.disabled(busy) }; ToolbarItem(placement: .confirmationAction) { Button { Task { await create() } } label: { if busy { ProgressView() } else { Text(initialPrompt.isEmpty ? "创建" : "开始任务").bold() } }.disabled(busy).accessibilityIdentifier("native.chat.create") } }
             .interactiveDismissDisabled(busy)
             .sheet(isPresented: $newProject) { NativeProjectForm(model: model, initial: model.project?.registered == false ? model.project : nil) { p in projects.removeAll { $0.key == p.key }; projects.append(p); project = p.key } }
             .task {
-                if !initialPrompt.isEmpty && title.isEmpty { title = String(initialPrompt.split(separator: "\n", maxSplits: 1).first.map(String.init)?.prefix(90) ?? "新任务") }
                 do {
                     let value = try await model.api.value("/api/projects")
                     projects = try JSONDecoder().decode([LinkProject].self, from: JSONEncoder().encode(value["projects"]))
-                    project = model.project.flatMap { p in projects.contains(where: { $0.key == p.key }) ? p.key : nil } ?? projects.first?.key ?? ""
+                    project = model.project.flatMap { p in projects.contains(where: { $0.key == p.key }) ? p.key : nil } ?? projects.first(where: { $0.host == "local" })?.key ?? ""
                 } catch { self.error = error.localizedDescription }
+                do {
+                    settings = try await model.api.value("/api/codex-settings")
+                } catch {
+                    if self.error.isEmpty { self.error = "模型和权限选项暂不可用：" + error.localizedDescription }
+                }
+                do { models = try await model.api.value("/api/codex-settings/models")["models"].array }
+                catch { if self.error.isEmpty { self.error = "模型选项暂不可用：" + error.localizedDescription } }
+            }
+            .onChange(of: modelID) { selected in
+                guard let row = models.first(where: { $0["id"].string == selected }) else { effort = ""; return }
+                let options = row["efforts"].array.map(\.string)
+                effort = options.contains(row["defaultEffort"].string) ? row["defaultEffort"].string : ""
             }
         }
     }
     private func create() async {
         busy = true; error = ""; defer { busy = false }
         do {
-            let content = project + "\n" + title
+            let resolvedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let content = project + "\n" + resolvedTitle + "\n" + modelID + "\n" + effort + "\n" + approvalPolicy + "\n" + sandboxMode
             if attempt?.content != content { attempt = (content, UUID().uuidString.lowercased()) }
-            let result = try await model.api.value("/api/sessions", body: json(["project": string(project), "title": string(title.isEmpty ? "新对话" : title), "id": string(attempt!.id)]))
+            var selected: [String: JSONValue] = [:]
+            if canOverrideSettings {
+                selected = ["model": string(modelID), "effort": string(effort), "approvalPolicy": string(approvalPolicy), "sandbox": string(sandboxMode)]
+            }
+            let result = try await model.api.value("/api/sessions", body: json(["project": string(project), "title": string(resolvedTitle), "id": string(attempt!.id), "settings": json(selected)]))
             let row: LinkSession = try await model.api.request("/api/session-meta/\(result["id"].string)", query: ["host": result["host"].string.isEmpty ? "local" : result["host"].string])
             await model.load(); onCreated(row); dismiss()
         } catch { self.error = error.localizedDescription }
+    }
+    private func approvalLabel(_ value: String) -> String {
+        switch value { case "untrusted": return "不信任命令时审批"; case "on-request": return "按请求审批"; case "on-failure": return "失败时审批"; case "never": return "不审批"; default: return value }
+    }
+    private func sandboxLabel(_ value: String) -> String {
+        switch value { case "read-only": return "只读"; case "workspace-write": return "工作区可写"; case "danger-full-access": return "完全访问"; default: return value }
     }
 }

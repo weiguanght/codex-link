@@ -13,6 +13,8 @@ import test_link as support
 from mac.workspace import Workspace, ProjectHosts
 from mac.workspace_http import archive
 from mac.history_catalog import ReadingLibrary
+from bridge.create import create_empty
+from bridge.service import Bridge
 
 
 class WorkspaceTests(unittest.TestCase):
@@ -36,6 +38,50 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(config.read_text(), '{}')
         self.assertEqual(Workspace(self.root, self.workspace.hosts).projects()[0]['cwd'], str(self.folder))
         self.assertEqual(self.workspace.path.stat().st_mode & 0o777, 0o600)
+
+    def test_new_chat_settings_are_thread_start_overrides(self):
+        calls = []
+        thread_id = history.uid(901)
+        def request(method, params):
+            calls.append((method, params))
+            return {'thread': {'id': thread_id}} if method == 'thread/start' else {}
+        with patch('bridge.create._runtime_operation', side_effect=lambda _runtime, _home, _cwd, operation: operation(request)):
+            result = create_empty('codex', self.home, str(self.folder), 'Custom title', {
+                'model': 'gpt-5.4', 'effort': 'high', 'approvalPolicy': 'on-request', 'sandbox': 'workspace-write'
+            })
+        self.assertEqual(result, thread_id)
+        self.assertEqual(calls[0], ('thread/start', {
+            'cwd': str(self.folder), 'ephemeral': False, 'model': 'gpt-5.4',
+            'config': {'model_reasoning_effort': 'high'}, 'approvalPolicy': 'on-request', 'sandbox': 'workspace-write'
+        }))
+
+    def test_automatic_title_does_not_set_a_fixed_name(self):
+        calls = []
+        def request(method, params):
+            calls.append(method)
+            return {'thread': {'id': history.uid(902)}} if method == 'thread/start' else {}
+        with patch('bridge.create._runtime_operation', side_effect=lambda _runtime, _home, _cwd, operation: operation(request)):
+            create_empty('codex', self.home, str(self.folder), '')
+        self.assertEqual(calls, ['thread/start', 'thread/read'])
+
+    def test_projectless_chat_and_retry_keep_creation_settings(self):
+        bridge = SimpleNamespace(hosts=self.bridge.hosts, create_lock=threading.RLock(), creations={},
+            ipc=SimpleNamespace(connect=lambda: None), _save_creations=lambda: None,
+            catalog_reader=SimpleNamespace(executable='synthetic'), codex_home=self.home,
+            for_host=lambda host: SimpleNamespace(store=None))
+        options = {'model': 'gpt-5.4', 'effort': 'high', 'approvalPolicy': 'on-request', 'sandbox': 'workspace-write'}
+        with patch('bridge.service.create_empty', return_value=history.uid(903)) as create, \
+             patch('bridge.service.open_in_desktop'), patch('bridge.service.Path.home', return_value=self.folder):
+            first = Bridge.create_chat(bridge, '', '', history.uid(904), options)
+            second = Bridge.create_chat(bridge, None, '', history.uid(904), options)
+            self.assertEqual(first['id'], second['id'])
+            create.assert_called_once_with('synthetic', self.home, str(self.folder), '', options)
+            with self.assertRaisesRegex(ValueError, '不同内容'):
+                Bridge.create_chat(bridge, None, '', history.uid(904), dict(options, effort='low'))
+        with patch('bridge.service.create_empty') as create:
+            with self.assertRaisesRegex(ValueError, '选项无效'):
+                Bridge.create_chat(bridge, None, '', history.uid(905), {'sandbox': 'invalid'})
+            create.assert_not_called()
 
     def test_empty_project_visible_and_can_be_used_by_original_creation_lookup(self):
         project = self.create()
@@ -185,9 +231,11 @@ class WorkspaceHTTPTests(unittest.TestCase):
         code, result, _ = self.request('/api/projects', headers=headers)
         self.assertEqual(result['projects'][0]['key'], value['project']['key'])
         # The unchanged create route resolves the newly registered directory.
-        self.bridge.create_chat = lambda key, title, request: {'project': next(p for p in self.bridge.hosts.projects() if p['key'] == key)}
+        self.bridge.create_chat = lambda key, title, request, settings=None: {'project': next((p for p in self.bridge.hosts.projects() if p['key'] == key), None), 'settings': settings or {}}
         code, result, _ = self.request('/api/sessions', {'project': value['project']['key'], 'title': 'Test', 'id': history.uid(101)}, headers)
-        self.assertEqual(code, 200); self.assertEqual(result['project']['cwd'], str(self.home.resolve()))
+        self.assertEqual(code, 200); self.assertEqual(result['project']['cwd'], str(self.home.resolve())); self.assertEqual(result['settings'], {})
+        code, result, _ = self.request('/api/sessions', {'project': '', 'title': 'No project', 'id': history.uid(102), 'settings': {'model': 'gpt-5.4', 'effort': 'high', 'approvalPolicy': 'on-request', 'sandbox': 'workspace-write'}}, headers)
+        self.assertEqual(code, 200); self.assertEqual(result['settings']['approvalPolicy'], 'on-request')
 
     def test_readonly_preferences_never_grant_archive_or_send_capability(self):
         headers = self.authenticate()

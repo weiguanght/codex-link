@@ -68,12 +68,12 @@ def main():
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         parser.error('这个数据目录已有网关在运行')
-    from bridge.service import Bridge
+    from mac.desktop_bridge import DesktopBridge
     from bridge.notifications import Notifications
     from mac.network import discover, origin
     from mac.server import LinkServer
 
-    bridge = Bridge(args.codex_home, args.data / 'bridge')
+    bridge = DesktopBridge(args.codex_home, args.data / 'bridge')
     server = None
     publisher = None
     notifications = None

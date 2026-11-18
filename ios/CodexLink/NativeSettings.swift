@@ -37,7 +37,7 @@ struct NativeAppSettings: View {
                 Toggle("命令与输出自动换行", isOn: $commandLineWrapping).accessibilityIdentifier("native.settings.commandWrapping")
                 Toggle("文件变更自动换行", isOn: $diffLineWrapping)
             } header: { Text("任务与阅读") } footer: {
-                Text("默认方式用于尚无草稿的新会话，当前会话仍可单独选择。输入草稿只保存在此设备；忘记 Mac 时一并清除。")
+                Text("默认方式用于任务执行期间的后续消息；任务结束后直接发送。当前会话可单独选择。输入草稿只保存在此设备；忘记 Mac 时一并清除。")
             }
             Section("连接") {
                 Label(connection.status, systemImage: connection.online ? "checkmark.circle" : "network.slash").font(.subheadline)

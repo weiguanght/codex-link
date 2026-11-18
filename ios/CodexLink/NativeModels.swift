@@ -150,6 +150,12 @@ struct PendingAttachment: Identifiable {
 }
 
 @MainActor
+final class NativeComposerDraft: ObservableObject {
+    @Published var value = ChatDraft() { didSet { onChange?() } }
+    var onChange: (() -> Void)?
+}
+
+@MainActor
 final class ChatModel: ObservableObject {
     let api: NativeAPI
     @Published var session: LinkSession?
@@ -167,7 +173,12 @@ final class ChatModel: ObservableObject {
     @Published var convertingCLI = false
     @Published var conversionError = ""
     @Published var hasMore = false
-    @Published var draft = ChatDraft() { didSet { scheduleDraftSave() } }
+    // Keystrokes belong to the composer, not the transcript's observation graph.
+    let composer = NativeComposerDraft()
+    var draft: ChatDraft {
+        get { composer.value }
+        set { composer.value = newValue }
+    }
     @Published private(set) var draftStorageError = ""
     @Published var logView = false
     @Published var revision = 0
@@ -190,6 +201,7 @@ final class ChatModel: ObservableObject {
     private var unreadableDrafts = Set<String>()
     init(api: NativeAPI, draftStore: DraftStore = .shared, draftScope: String? = nil) {
         self.api = api; self.draftStore = draftStore; self.draftScope = draftScope
+        composer.onChange = { [weak self] in self?.scheduleDraftSave() }
     }
     func setDraftScope(_ scope: String?) {
         guard scope != draftScope else { return }
@@ -215,7 +227,10 @@ final class ChatModel: ObservableObject {
     private func saveDraft(_ value: ChatDraft, for identity: String) {
         drafts[identity] = value
         guard let draftScope, !unreadableDrafts.contains(identity) else { return }
-        do { try draftStore.save(value, scope: draftScope, identity: identity); draftStorageError = "" }
+        do {
+            try draftStore.save(value, scope: draftScope, identity: identity)
+            if !draftStorageError.isEmpty { draftStorageError = "" }
+        }
         catch { draftStorageError = "本机草稿未保存：" + error.localizedDescription }
     }
     private func restoredDraft(for identity: String) -> ChatDraft {
@@ -310,7 +325,8 @@ final class ChatModel: ObservableObject {
                 var query = params(); query["after"] = String(sequence); query["epoch"] = epoch; query["start"] = before ?? ""
                 let page: TimelinePage = try await api.request(path(sequence < 0 ? "timeline" : "changes"), query: query)
                 guard token == generation, !Task.isCancelled else { return }
-                pollingError = ""; apply(page, replace: page.reset == true || sequence < 0); await sendPrimedDraftIfReady()
+                if !pollingError.isEmpty { pollingError = "" }
+                apply(page, replace: page.reset == true || sequence < 0); await sendPrimedDraftIfReady()
             } catch is CancellationError { return }
             catch { if !Task.isCancelled && token == generation { self.pollingError = error.localizedDescription } }
         }
@@ -339,17 +355,31 @@ final class ChatModel: ObservableObject {
         }
     }
     private func apply(_ page: TimelinePage, replace: Bool, older: Bool = false) {
-        if replace { rows = []; details = [:]; diffStats = [:]; epoch = page.epoch }
-        var mapping = Dictionary(uniqueKeysWithValues: rows.map { ($0.key, $0) })
-        for row in page.rows { mapping[row.key] = row }
-        let updated = mapping.values.sorted { $0.order == $1.order ? $0.key < $1.key : $0.order < $1.order }
-        if rows != updated { rows = updated }
-        if !older || replace { meta = page.meta; capabilities = page.capabilities; sequence = page.sequence }
-        if replace || older { before = page.before; hasMore = page.hasMore ?? false }
+        // Publish one final array. A transient empty array destroys row identity
+        // and the reading anchor when a polling reset races with pagination.
+        if replace {
+            if !details.isEmpty || !diffStats.isEmpty { revision += 1 }
+            details = [:]; diffStats = [:]; epoch = page.epoch
+        }
+        if replace || !page.rows.isEmpty {
+            var mapping = Dictionary(uniqueKeysWithValues: (replace ? [] : rows).map { ($0.key, $0) })
+            for row in page.rows { mapping[row.key] = row }
+            let updated = mapping.values.sorted { $0.order == $1.order ? $0.key < $1.key : $0.order < $1.order }
+            if rows != updated { rows = updated }
+        }
+        if !older || replace {
+            if meta != page.meta { meta = page.meta }
+            if capabilities != page.capabilities { capabilities = page.capabilities }
+            sequence = page.sequence
+        }
+        if replace || older {
+            before = page.before
+            if hasMore != (page.hasMore ?? false) { hasMore = page.hasMore ?? false }
+        }
         var artifacts = Dictionary(uniqueKeysWithValues: files.map { ($0["id"].string, $0) })
         for file in page.files ?? [] { artifacts[file["id"].string] = file }
-        files = artifacts.values.sorted { $0["name"].string < $1["name"].string }
-        revision += 1
+        let updatedFiles = artifacts.values.sorted { $0["name"].string < $1["name"].string }
+        if files != updatedFiles { files = updatedFiles }
     }
     func older(beforeApply: (() -> Void)? = nil) async {
         guard hasMore, !loadingOlder, session != nil else { return }
@@ -396,35 +426,67 @@ final class ChatModel: ObservableObject {
     func send(mode: String? = nil) async {
         guard canSend, let target = session else { return }
         let apiGeneration = api.generation
-        let sendMode = mode ?? draft.sendMode
-        guard ["send", "queue", "steer"].contains(sendMode) else { return }
-        var fields: [String: JSONValue] = ["text": string(draft.text), "mode": string(sendMode), "skills": .array(draft.skills.map(string)),
+        let requestedMode = mode ?? draft.sendMode
+        guard ["send", "queue", "steer"].contains(requestedMode) else { return }
+        let effectiveMode = NativeSendMode.resolve(requestedMode, running: running)
+        sending.insert(target.identity); error = ""; notice = ""
+        defer { sending.remove(target.identity) }
+        var fields: [String: JSONValue] = ["text": string(draft.text), "mode": string(effectiveMode), "skills": .array(draft.skills.map(string)),
             "attachments": .array(draft.attachments.map { string($0.id) }), "uiLocale": string("zh-CN")]
-        if sendMode != "steer" { fields["workMode"] = string(draft.workMode) }
+        if effectiveMode != "steer" { fields["workMode"] = string(draft.workMode) }
+        // An unconfirmed submission keeps its original payload even if the
+        // task finished meanwhile, so retrying cannot submit the message twice.
+        if let previous = draft.attempt?.payload,
+           mode == nil || previous["mode"].string == requestedMode || previous["mode"].string == effectiveMode,
+           ["text", "skills", "attachments", "uiLocale"].allSatisfy({ previous[$0] == fields[$0] }),
+           previous["workMode"] == .null || previous["workMode"].string == draft.workMode {
+            fields = previous.object
+        }
+        let sendMode = fields["mode"]?.string ?? effectiveMode
         let payload = json(fields)
         if draft.attempt?.payload != payload { draft.attempt = DraftSendAttempt(payload: payload, id: UUID().uuidString.lowercased()) }
         flushDraft()
         let submitted = draft
-        fields["id"] = string(submitted.attempt!.id)
-        sending.insert(target.identity); error = ""; notice = ""
-        defer { sending.remove(target.identity) }
+        var activeAttempt = submitted.attempt!
+        fields["id"] = string(activeAttempt.id)
+        let result: JSONValue
         do {
-            let result = try await action("send", body: json(fields))
-            guard api.ready, apiGeneration == api.generation else { return }
-            let current = session?.identity == target.identity
-            if result["status"].string == "unknown" || result["confirmed"] == .bool(false) {
-                if current { notice = "发送结果未确认，草稿已保留。重试会沿用同一请求标识。" }; return
+            result = try await action("send", body: json(fields))
+        } catch {
+            guard sendMode == "steer", NativeSendMode.isFinishedTaskError(error.localizedDescription),
+                  session?.identity == target.identity else {
+                if session?.identity == target.identity { self.error = error.localizedDescription + "。草稿已保留，可重试同一请求。" }
+                return
             }
-            var latest = current ? draft : drafts[target.identity] ?? submitted
-            // Do not erase text entered while the acknowledged request was in flight.
-            if latest.text == submitted.text { latest.text = "" }
-            let sentFiles = Set(submitted.attachments.map(\.id))
-            latest.attachments.removeAll { sentFiles.contains($0.id) }
-            if latest.attempt?.id == submitted.attempt?.id { latest.attempt = nil }
-            latest.recoveryNotice = ""
-            saveDraft(latest, for: target.identity)
-            if current { draft = latest; notice = result["status"].string == "queued" ? "已加入待发送队列" : "消息已提交" }
-        } catch { if session?.identity == target.identity { self.error = error.localizedDescription + "。草稿已保留，可重试同一请求。" } }
+            var fallback: [String: JSONValue] = ["text": string(submitted.text), "mode": string("send"),
+                "skills": .array(submitted.skills.map(string)), "attachments": .array(submitted.attachments.map { string($0.id) }),
+                "uiLocale": string("zh-CN"), "workMode": string(submitted.workMode)]
+            let fallbackPayload = json(fallback)
+            let fallbackAttempt = DraftSendAttempt(payload: fallbackPayload, id: UUID().uuidString.lowercased())
+            activeAttempt = fallbackAttempt
+            draft.attempt = fallbackAttempt
+            flushDraft()
+            fallback["id"] = string(fallbackAttempt.id)
+            do { result = try await action("send", body: json(fallback)) }
+            catch {
+                if session?.identity == target.identity { self.error = error.localizedDescription + "。草稿已保留，可重试同一请求。" }
+                return
+            }
+        }
+        guard api.ready, apiGeneration == api.generation else { return }
+        let current = session?.identity == target.identity
+        if result["status"].string == "unknown" || result["confirmed"] == .bool(false) {
+            if current { notice = "发送结果未确认，草稿已保留。重试会沿用同一请求标识。" }; return
+        }
+        var latest = current ? draft : drafts[target.identity] ?? submitted
+        // Do not erase text entered while the acknowledged request was in flight.
+        if latest.text == submitted.text { latest.text = "" }
+        let sentFiles = Set(submitted.attachments.map(\.id))
+        latest.attachments.removeAll { sentFiles.contains($0.id) }
+        if latest.attempt?.id == activeAttempt.id { latest.attempt = nil }
+        latest.recoveryNotice = ""
+        saveDraft(latest, for: target.identity)
+        if current { draft = latest; notice = result["status"].string == "queued" ? "已加入待发送队列" : "消息已提交" }
     }
     func upload(_ url: URL, name: String? = nil) async throws {
         guard !readOnly, let target = session else { throw LinkError.message("只读历史无法添加附件") }
@@ -454,4 +516,13 @@ final class ChatModel: ObservableObject {
         return true
     }
     func clear() { detailLoads.values.forEach { $0.cancel() }; detailLoads = [:]; diffLoads = []; details = [:]; diffStats = [:]; flushDraft(); draftSaveTask?.cancel(); draftSaveTask = nil; generation += 1; sending = []; autoSend = []; drafts = [:]; session = nil; draft = ChatDraft(); rows = []; meta = .null; files = []; loadedLogView = nil; logView = false }
+}
+
+enum NativeSendMode {
+    static func resolve(_ requested: String, running: Bool) -> String {
+        !running && ["steer", "queue"].contains(requested) ? "send" : requested
+    }
+    static func isFinishedTaskError(_ message: String) -> Bool {
+        message.contains("当前任务已经结束")
+    }
 }

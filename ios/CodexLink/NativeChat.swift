@@ -16,7 +16,6 @@ struct NativeChatView: View {
     @State private var sendSettings = false
     @State private var chooseSendMode = false
     @State private var contextUsage: JSONValue = .null
-    @AppStorage("native.followUpBehavior") private var defaultSendMode = "send"
     @State private var status = false
     @State private var importFile = false
     @State private var takePhoto = false
@@ -33,12 +32,9 @@ struct NativeChatView: View {
     @State private var toolDetail: NativeRow?
     @State private var workspaceSession: LinkSession?
     @State private var following = true
-    @State private var draggingHistory = false
-    @State private var bottomPosition: CGFloat?
     @State private var scrollRequest = 0
     @State private var historyLoadRequest = 0
     @State private var composerHeight: CGFloat = 110
-    @StateObject private var historyScroll = NativeHistoryScrollController()
     @State private var backProgress: CGFloat = 0
     @State private var completingBack = false
     @State private var homeMode = 0
@@ -46,20 +42,10 @@ struct NativeChatView: View {
     @State private var projectSort = "tasks"
     @State private var hostFilter = "all"
     @FocusState private var focused: Bool
-    private struct Block: Identifiable {
-        let rows: [NativeRow]
-        var id: String { rows.first?.key ?? "" }
-        var process: Bool { rows[0].isProcess }
-    }
-    private var blocks: [Block] {
-        var result: [Block] = [], process: [NativeRow] = []
-        for row in chat.visibleRows {
-            if row.isProcess { process.append(row) }
-            else { if !process.isEmpty { result.append(Block(rows: process)); process = [] }; result.append(Block(rows: [row])) }
-        }
-        if !process.isEmpty { result.append(Block(rows: process)) }; return result
-    }
     var body: some View {
+        #if LINK_SMOKE
+        let _ = NativeChatRenderMetrics.pageBodies += 1
+        #endif
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
                 home
@@ -86,6 +72,7 @@ struct NativeChatView: View {
                 }
             }.clipped()
         }
+        .nativeCopyFeedback()
         .task(id: completingBack) {
             guard completingBack else { return }
             let identity = chat.session?.identity
@@ -94,10 +81,15 @@ struct NativeChatView: View {
             onHome()
         }
         .background(Color.linkCanvas)
+        #if LINK_SMOKE
+        .overlay(alignment: .topLeading) {
+            if ProcessInfo.processInfo.environment["LINK_SMOKE_RENDER_METRICS"] == "1" { NativeChatRenderMetricsView() }
+        }
+        #endif
         .toolbar { navigationControls }
         .sheet(isPresented: $threadSettings) { NativeThreadSettings(chat: chat) }
         .sheet(isPresented: $permissionSettings) { NavigationStack { NativeCodexSettings(api: chat.api, workspace: workspace, initialScope: "", permissionsOnly: true) } }
-        .sheet(isPresented: $sendSettings) { messageSendSettings }
+        .sheet(isPresented: $sendSettings) { NativeSendSettings(draft: chat.composer) }
         .sheet(isPresented: $chooseSendMode) { sendModeChooser }
         .task(id: chat.session?.identity) {
             contextUsage = .null
@@ -106,16 +98,16 @@ struct NativeChatView: View {
                 do {
                     let result = try await chat.api.value("/api/native/v1/threads/\(session.id)/usage", query: ["host": session.host])
                     guard !Task.isCancelled, chat.session?.identity == session.identity else { return }
-                    contextUsage = result["context"]
+                    if contextUsage != result["context"] { contextUsage = result["context"] }
                 } catch is CancellationError { return }
                 catch { /* Missing log or network: retain the last confirmed sample. */ }
                 do { try await Task.sleep(nanoseconds: 15_000_000_000) } catch { return }
             }
         }
-        .sheet(isPresented: $status) { threadStatus }
+        .sheet(isPresented: $status) { threadStatus.nativeCopyFeedback() }
         .sheet(item: $share) { ShareView(file: $0.url) }
         .sheet(item: $preview, onDismiss: { preview = nil }) { NativeFilePreview(file: $0) }
-        .sheet(item: $toolDetail) { row in NativeToolDetail(chat: chat, rowKey: row.key, sessionIdentity: chat.session?.identity ?? "") }
+        .sheet(item: $toolDetail) { row in NativeToolDetail(chat: chat, rowKey: row.key, sessionIdentity: chat.session?.identity ?? "").nativeCopyFeedback() }
         .sheet(item: $messageAction) { NativeMessageAction(chat: chat, row: $0, workspace: workspace) }
         .sheet(item: $workspaceSession) { session in
             NativeWorkspaceBrowser(api: chat.api, session: session, canEdit: chat.capabilities["workspaceWrite"].bool) { text in
@@ -147,7 +139,7 @@ struct NativeChatView: View {
             }.ignoresSafeArea()
         }
         .alert("操作失败", isPresented: Binding(get: { !actionError.isEmpty }, set: { if !$0 { actionError = "" } })) { Button("好", role: .cancel) {} } message: { Text(actionError) }
-        .onChange(of: chat.session?.identity) { _ in backProgress = 0; completingBack = false; chooseSendMode = false; historyLoadRequest = 0; historyScroll.releaseAnchor(); following = true; draggingHistory = false; bottomPosition = nil; focused = false; workspaceSession = nil; toolDetail = nil }
+        .onChange(of: chat.session?.identity) { _ in backProgress = 0; completingBack = false; chooseSendMode = false; historyLoadRequest = 0; following = true; focused = false; workspaceSession = nil; toolDetail = nil }
         .environment(\.openURL, OpenURLAction { url in
             if let file = NativeMessageLinks.file(for: url, files: chat.files) {
                 download(file); return .handled
@@ -225,25 +217,12 @@ struct NativeChatView: View {
             menuAction("新建对话", icon: "square.and.pencil", identifier: "native.chat.new") { onNewChat("") }
         }.accessibilityElement(children: .contain)
     }
-    private var messageSendSettings: some View {
-        NavigationStack {
-            Form {
-                Picker("工作模式", selection: $chat.draft.workMode) { Text("普通").tag("default"); Text("计划").tag("plan") }
-                Picker("默认发送方式", selection: $chat.draft.sendMode) {
-                    Text("发送新消息").tag("send"); Text("完成后发送").tag("queue"); Text("补充当前任务").tag("steer")
-                }.accessibilityIdentifier("native.send.defaultMode")
-                Text("轻点发送按钮使用默认方式；长按可仅为本次消息选择方式。").font(.footnote).foregroundStyle(.secondary)
-            }.navigationTitle("消息发送设置").navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { sendSettings = false } } }
-                .onChange(of: chat.draft.sendMode) { defaultSendMode = $0 }
-        }
-    }
     private var sendModeChooser: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("本次发送方式").font(.headline).padding(.horizontal, 20).padding(.vertical, 16)
             sendChoice("发送新消息", icon: "arrow.up.circle", mode: "send")
-            sendChoice("完成后发送", icon: "clock.arrow.circlepath", mode: "queue")
-            sendChoice("补充当前任务", icon: "arrow.turn.down.right", mode: "steer")
+            sendChoice("完成后发送", icon: "clock.arrow.circlepath", mode: "queue").disabled(!chat.running)
+            sendChoice("补充当前任务", icon: "arrow.turn.down.right", mode: "steer").disabled(!chat.running)
         }.padding(.bottom, 16).presentationDetents([.height(252)]).presentationDragIndicator(.visible)
     }
     private func sendChoice(_ title: String, icon: String, mode: String) -> some View {
@@ -252,7 +231,7 @@ struct NativeChatView: View {
         }.buttonStyle(.plain).disabled(!chat.canSend).accessibilityIdentifier("native.send.once." + mode)
     }
     private func sendMessage(mode: String? = nil) {
-        historyScroll.releaseAnchor(); following = true
+        following = true; scrollRequest += 1
         Task { await chat.send(mode: mode) }
     }
     private var home: some View {
@@ -324,188 +303,65 @@ struct NativeChatView: View {
         }
     }
     private var conversation: some View {
-        GeometryReader { viewport in
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(spacing: 0) {
-                        Color.clear.frame(height: 1).background(NativeHistoryScrollProbe(
-                            controller: historyScroll, identity: chat.session?.identity ?? "",
-                            enabled: chat.hasMore && !chat.loadingOlder && !chat.loading,
-                            keys: chat.visibleRows.map(\.key),
-                            onLoad: { following = false; historyLoadRequest += 1 },
-                            onDragging: { dragging in
-                                draggingHistory = dragging
-                                following = dragging || historyScroll.preservingHistory ? false : bottomPosition.map { $0 >= 0 && $0 <= viewport.size.height + 75 } ?? false
-                            }
-                        )).accessibilityHidden(true)
-                        LazyVStack(alignment: .leading, spacing: 24) {
-                        if chat.loading { ProgressView("正在读取对话…").frame(maxWidth: .infinity).padding(.vertical, 24) }
-                        ForEach(blocks) { block in
-                            if block.process {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    ForEach(block.rows) { row in
-                                        processRow(row).id(row.key)
-                                            .background(NativeHistoryRowMarker(id: row.key, controller: historyScroll))
-                                            .modifier(NativeHistoryReveal(id: row.key, controller: historyScroll))
-                                    }
-                                }.id(block.id)
-                            } else if let row = block.rows.first {
-                                message(row).id(block.id).background(NativeHistoryRowMarker(id: block.id, controller: historyScroll))
-                                    .modifier(NativeHistoryReveal(id: row.key, controller: historyScroll))
-                            }
-                        }
-                        if chat.running { HStack(spacing: 10) { ProgressView().scaleEffect(0.7); Text("Codex 正在执行").font(.caption).foregroundStyle(.secondary) } }
-                        ForEach(Array(chat.requests.enumerated()), id: \.offset) { _, request in NativeApprovalView(chat: chat, request: request) }
-                        if !chat.files.isEmpty {
-                            DisclosureGroup {
-                                NativeFileListLayout {
-                                    ForEach(Array(chat.files.enumerated()), id: \.offset) { _, file in
-                                        Button { download(file) } label: {
-                                            Label(file["name"].string, systemImage: file["image"].bool ? "photo" : "doc")
-                                                .multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
-                                        }.disabled(downloading.contains("files/" + file["id"].string)).padding(.vertical, 6)
-                                            .accessibilityIdentifier("native.chat.file." + file["name"].string)
-                                    }
-                                }
-                            } label: {
-                                Text("对话文件 · \(chat.files.count)").accessibilityIdentifier("native.chat.files")
-                            }.font(.subheadline)
-                        }
-                        NativeNotice(text: chat.pollingError, isError: true)
-                        NativeNotice(text: chat.error, isError: true)
-                        NativeNotice(text: chat.notice)
-                        NativeNotice(text: chat.draft.recoveryNotice)
-                        NativeNotice(text: chat.draftStorageError, isError: true)
-                        Color.clear.frame(height: composerHeight)
-                        Color.clear.frame(height: 1).id("native-bottom").background(GeometryReader { geometry in Color.clear.preference(key: BottomPosition.self, value: geometry.frame(in: .named("native-transcript")).maxY) })
-                        }.padding(.horizontal, 22).padding(.vertical, 24).frame(maxWidth: 820).frame(maxWidth: .infinity)
-                    }
-                }
-                .accessibilityIdentifier("native.transcript")
-                .coordinateSpace(name: "native-transcript")
-                .task(id: historyLoadRequest) {
-                    guard historyLoadRequest > 0, chat.hasMore, !chat.loadingOlder else { return }
-                    let identity = chat.session?.identity
-                    following = false
-                    await chat.older(beforeApply: { historyScroll.captureAnchor() })
-                    guard !Task.isCancelled, chat.session?.identity == identity else { return }
-                    // Layout markers correct the exact pixel displacement as lazy rows settle.
-                    await Task.yield()
-                    historyScroll.finish()
-                }
-                .overlay(alignment: .top) { NativeHistoryIndicator(controller: historyScroll) }
-
-                .onPreferenceChange(BottomPosition.self) { bottom in
-                    bottomPosition = bottom
-                    // A lazily removed bottom marker has no position; it is not at y = 0.
-                    guard let bottom else { return }
-                    // Content growth must not turn off an existing follow request.
-                    // Only a user's drag or history action pauses following.
-                    if !draggingHistory && !historyScroll.preservingHistory && bottom >= 0 && bottom <= viewport.size.height + 75 { following = true }
-                }
-                .scrollDismissesKeyboard(.interactively)
-                .onChange(of: chat.visibleRows) { _ in if following && !chat.loadingOlder && !historyScroll.preservingHistory { scrollRequest += 1 } }
-                .onChange(of: chat.loading) { loading in if !loading && following { scrollRequest += 1 } }
-                .onChange(of: chat.notice) { notice in if !notice.isEmpty && following { scrollRequest += 1 } }
-                .task(id: scrollRequest) {
-                    guard scrollRequest > 0 else { return }
-                    // Wait for LazyVStack to lay out the updated footer before locating it.
-                    do { try await Task.sleep(nanoseconds: 80_000_000) } catch { return }
-                    if following && !draggingHistory && !chat.loadingOlder && !historyScroll.preservingHistory { proxy.scrollTo("native-bottom", anchor: .bottom) }
-                }
-                .overlay(alignment: .bottomTrailing) {
-                    if !following { NativeIconButton(symbol: "arrow.down", label: "回到最新消息", filled: true) { historyScroll.releaseAnchor(); following = true; withAnimation { proxy.scrollTo("native-bottom", anchor: .bottom) } }.padding(16) }
-                }
-            }
+        NativeTranscript(identity: chat.session?.identity ?? "", rows: chat.visibleRows.map { row in
+            NativeChatRow(sessionIdentity: chat.session?.identity ?? "", cursor: chat.cursor(for: row), row: row,
+                text: chat.rowText(row), stats: chat.fileChangeStats(row), readOnly: chat.readOnly, hasMore: chat.rowHasMore(row),
+                onTool: { focused = false; toolDetail = row }, onAttachment: { openAttachment($0) }, onCopy: { NativeClipboard.copy($0) },
+                onExpand: { perform { try await chat.expand(row) } }, onMessageAction: { messageAction = row },
+                onLoadStats: { await chat.loadFileChangeStats(row) })
+        }, footer: AnyView(transcriptFooter),
+            footerState: NativeTranscriptFooterState(meta: chat.meta, files: chat.files, loading: chat.loading,
+                readOnly: chat.readOnly, pollingError: chat.pollingError, error: chat.error, notice: chat.notice,
+                draftStorageError: chat.draftStorageError, downloading: downloading),
+            bottomInset: composerHeight,
+            canLoadOlder: chat.hasMore && !chat.loadingOlder && !chat.loading, loadingOlder: chat.loadingOlder,
+            scrollRequest: scrollRequest,
+            onLoadOlder: { following = false; historyLoadRequest += 1 },
+            onFollowing: { following = $0; if !$0 { focused = false } })
+        .task(id: historyLoadRequest) {
+            guard historyLoadRequest > 0 else { return }
+            await chat.older()
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if !following { NativeIconButton(symbol: "arrow.down", label: "回到最新消息", filled: true) { following = true; scrollRequest += 1 }.padding(16).padding(.bottom, composerHeight) }
         }
         .overlay(alignment: .bottom) {
-            composer.background(GeometryReader { geometry in
+            NativeChatComposer(chat: chat, draft: chat.composer, focus: $focused, contextUsage: contextUsage, uploading: uploading,
+                onPhoto: { photoPicker = true }, onCamera: { takePhoto = true }, onFile: { importFile = true },
+                onSend: { sendMessage() }, onChooseMode: { chooseSendMode = true }, onError: { actionError = $0 })
+            .background(GeometryReader { geometry in
                 Color.clear.preference(key: ComposerHeight.self, value: geometry.size.height)
             })
         }
         .onPreferenceChange(ComposerHeight.self) { height in
-            if height > 0 { composerHeight = height }
+            if height > 0 && abs(height - composerHeight) > 0.5 { composerHeight = height }
         }
     }
-    private func processRow(_ row: NativeRow) -> some View {
-        NativeToolRow(row: row, text: chat.rowText(row), stats: chat.fileChangeStats(row)) { focused = false; toolDetail = row }
-            .task(id: chat.cursor(for: row) + row.version.identifier) { await chat.loadFileChangeStats(row) }
-    }
-    private func message(_ row: NativeRow) -> some View {
-        VStack(alignment: row.role == "user" ? .trailing : .leading, spacing: 10) {
-            if row.role == "user" {
-                NativeSelectableText(value: AttributedString(chat.rowText(row)), accessibilityIdentifier: "native.message.selectable.user")
-                    .padding(.horizontal, 18).padding(.vertical, 14).background(Color.linkSurface, in: RoundedRectangle(cornerRadius: 24)).padding(.leading, 30)
-            } else if row.role == "error" { NativeNotice(text: chat.rowText(row), isError: true) }
-            else { NativeChatMarkdown(text: chat.rowText(row)).font(.system(size: 16)).lineSpacing(5) }
-            if let attachments = row.attachments {
+    private var transcriptFooter: some View {
+        VStack(alignment: .leading, spacing: 24) {
+        if chat.loading { ProgressView("正在读取对话…").frame(maxWidth: .infinity).padding(.vertical, 24) }
+        if chat.running { HStack(spacing: 10) { ProgressView().scaleEffect(0.7); Text("Codex 正在执行").font(.caption).foregroundStyle(.secondary) } }
+        ForEach(Array(chat.requests.enumerated()), id: \.offset) { _, request in NativeApprovalView(chat: chat, request: request) }
+        if !chat.files.isEmpty {
+            DisclosureGroup {
                 NativeFileListLayout {
-                    ForEach(Array(attachments.enumerated()), id: \.offset) { _, attachment in
-                        Button { openAttachment(attachment) } label: {
-                            Label(attachment["name"].string.isEmpty ? "附件" : attachment["name"].string, systemImage: "paperclip")
+                    ForEach(Array(chat.files.enumerated()), id: \.offset) { _, file in
+                        Button { download(file) } label: {
+                            Label(file["name"].string, systemImage: file["image"].bool ? "photo" : "doc")
                                 .multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
-                        }.font(.caption).padding(.vertical, 4)
+                        }.disabled(downloading.contains("files/" + file["id"].string)).padding(.vertical, 6)
+                            .accessibilityIdentifier("native.chat.file." + file["name"].string)
                     }
                 }
-            }
-            if chat.rowHasMore(row) { Button("继续加载正文") { following = false; perform { try await chat.expand(row) } }.font(.caption) }
-            if row.editable == true && !chat.readOnly {
-                Button { messageAction = row } label: { Label("编辑消息", systemImage: "pencil").font(.caption) }.foregroundStyle(.secondary)
-            }
-            if row.role == "assistant" {
-                HStack(spacing: 20) {
-                    Button { UIPasteboard.general.string = chat.rowText(row) } label: { Image(systemName: "doc.on.doc") }.accessibilityLabel("复制回复")
-                    ShareLink(item: chat.rowText(row)) { Image(systemName: "square.and.arrow.up") }.accessibilityLabel("分享回复")
-                    if row.forkable == true && !chat.readOnly { Button { messageAction = row } label: { Image(systemName: "arrow.triangle.branch") }.accessibilityLabel("从此处分支") }
-                }.font(.system(size: 14)).foregroundStyle(.secondary).padding(.top, 2)
-            }
+            } label: {
+                Text("对话文件 · \(chat.files.count)").accessibilityIdentifier("native.chat.files")
+            }.font(.subheadline)
         }
-        .frame(maxWidth: .infinity, alignment: row.role == "user" ? .trailing : .leading)
-    }
-
-    private var composer: some View {
-        VStack(spacing: 9) {
-            if chat.readOnly {
-                VStack(spacing: 4) {
-                    HStack(spacing: 10) {
-                        if chat.convertingCLI { ProgressView().controlSize(.small); Text("正在接管 CLI 会话…").font(.subheadline) }
-                        else { Image(systemName: "doc.text"); Text("只读历史").font(.subheadline) }
-                        Spacer()
-                        if chat.logView && chat.session?.readOnly != true { Button("返回交互视图") { chat.logView = false } }
-                    }
-                    if !chat.conversionError.isEmpty {
-                        HStack { Text(chat.conversionError).font(.caption).foregroundStyle(.red); Spacer(); Button("重试") { Task { await chat.retryCLIConversion() } }.font(.caption) }
-                    }
-                }.foregroundStyle(.secondary).padding(18)
-            } else {
-                if !chat.connected {
-                    HStack { Text(chat.meta["connecting"].bool || chat.meta["activating"].bool ? "正在连接 Mac 会话…" : "会话尚未连接").font(.caption).foregroundStyle(.secondary); Spacer(); Button("连接会话") { perform { try await chat.reconnect() } }.font(.caption.weight(.medium)) }.padding(.horizontal, 9)
-                }
-                if !chat.draft.attachments.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) { HStack {
-                        ForEach(chat.draft.attachments) { file in HStack(spacing: 8) { Image(systemName: "doc"); Text(file.name).lineLimit(1); Button { chat.draft.attachments.removeAll { $0.id == file.id } } label: { Image(systemName: "xmark.circle.fill") } }.font(.caption).padding(10).background(Color.linkSurface, in: Capsule()) }
-                    } }
-                }
-                HStack(alignment: .bottom, spacing: 8) {
-                    Menu {
-                        Button("选择照片", systemImage: "photo") { photoPicker = true }
-                        Button("拍照", systemImage: "camera") { takePhoto = true }.disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
-                        Divider()
-                        Button("选择文件", systemImage: "doc") { importFile = true }
-                    } label: { Image(systemName: "plus").frame(width: 44, height: 44).contentShape(Rectangle()) }
-                        .accessibilityLabel("添加附件").accessibilityIdentifier("native.attachment.menu").disabled(uploading || chat.busy)
-                    TextField("", text: $chat.draft.text, prompt: Text(NativeContextUsage(contextUsage)?.placeholder ?? "上下文用量暂无数据").foregroundColor(Color(uiColor: .placeholderText)), axis: .vertical).lineLimit(1...7).font(.system(size: 16)).focused($focused).padding(.vertical, 12).accessibilityIdentifier("native.composer")
-                    if uploading || chat.busy { ProgressView().frame(width: 44, height: 44) }
-                    else if chat.running && chat.draft.text.isEmpty && chat.draft.attachments.isEmpty {
-                        NativeIconButton(symbol: "stop.fill", label: "停止任务", filled: true) { perform { try await chat.stop() } }.disabled(!chat.connected)
-                    } else {
-                        NativeSendButton(enabled: chat.canSend, onSend: { sendMessage() }, onChooseMode: { focused = false; chooseSendMode = true })
-                            .frame(width: 44, height: 44)
-                    }
-                }.padding(7).background(Color.linkSurface, in: RoundedRectangle(cornerRadius: 29))
-
-            }
-        }.padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
+        NativeNotice(text: chat.pollingError, isError: true)
+        NativeNotice(text: chat.error, isError: true)
+        NativeNotice(text: chat.notice)
+        NativeNotice(text: chat.draftStorageError, isError: true)
+        }
     }
     private var threadStatus: some View {
         NavigationStack {
@@ -566,7 +422,7 @@ struct NativeChatView: View {
                     Section("操作") {
                         if !chat.readOnly { Button("模型与推理设置") { status = false; DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { threadSettings = true } }; Button("重新连接") { perform { try await chat.reconnect() } } }
                         if chat.capabilities["fullLog"].bool && !chat.logView { Button("只读查看完整日志") { chat.logView = true; status = false } }
-                        if let row = chat.session { Button("复制会话 ID") { UIPasteboard.general.string = row.id }; Button("返回任务列表") { workspace.selected = nil; status = false } }
+                        if let row = chat.session { Button("复制会话 ID") { NativeClipboard.copy(row.id) }; Button("返回任务列表") { workspace.selected = nil; status = false } }
                     }
                     if !chat.meta["submissions"].array.isEmpty {
                         Section("发送队列") {
@@ -660,7 +516,6 @@ private struct NativeCameraPicker: UIViewControllerRepresentable {
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { dismiss() }
     }
 }
-private struct BottomPosition: PreferenceKey { static var defaultValue: CGFloat? = nil; static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) { value = nextValue() ?? value } }
 private struct ComposerHeight: PreferenceKey { static var defaultValue: CGFloat = 0; static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) } }
 
 struct NativeModelEfforts {
@@ -706,9 +561,7 @@ struct NativeThreadSettings: View {
                 }
                 if !catalog["skills"].array.isEmpty {
                     Section("随消息使用的 Skills（最多 8 个）") {
-                        ForEach(Array(catalog["skills"].array.enumerated()), id: \.offset) { _, row in
-                            Toggle(row["name"].string, isOn: Binding(get: { chat.draft.skills.contains(row["id"].string) }, set: { enabled in if enabled && chat.draft.skills.count < 8 { chat.draft.skills.append(row["id"].string) } else { chat.draft.skills.removeAll { $0 == row["id"].string } } }))
-                        }
+                        NativeDraftSkills(draft: chat.composer, skills: catalog["skills"].array)
                     }
                 }
                 NativeNotice(text: error, isError: true)

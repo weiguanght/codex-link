@@ -1,6 +1,65 @@
 import SwiftUI
 import UIKit
 
+enum NativeClipboard {
+    static func copy(_ value: String) {
+        UIPasteboard.general.string = value
+        confirmCopy()
+    }
+    static func confirmCopy() {
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        NativeClipboardState.shared.didCopy()
+    }
+}
+
+final class NativeClipboardState: ObservableObject {
+    static let shared = NativeClipboardState()
+    @Published private(set) var generation = 0
+    func didCopy() { generation &+= 1 }
+}
+
+struct NativeCopyFeedback: View {
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "checkmark").font(.system(size: 24, weight: .bold))
+                .foregroundStyle(.white).frame(width: 56, height: 56)
+                .background(Color.green, in: Circle())
+            Text("已复制").font(.headline)
+        }
+        .padding(.horizontal, 24).padding(.vertical, 20)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.primary.opacity(0.08), lineWidth: 1))
+        .shadow(color: .black.opacity(0.2), radius: 20, y: 8)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("已复制")
+        .accessibilityIdentifier("native.copy.feedback")
+    }
+}
+
+struct NativeCopyFeedbackModifier: ViewModifier {
+    @ObservedObject private var clipboard = NativeClipboardState.shared
+    @State private var visible = false
+    @State private var token = UUID()
+    func body(content: Content) -> some View {
+        content.overlay {
+            if visible { NativeCopyFeedback().transition(.scale(scale: 0.78).combined(with: .opacity)).allowsHitTesting(false) }
+        }
+        .onChange(of: clipboard.generation) { _ in
+            let next = UUID(); token = next
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.68)) { visible = true }
+            Task {
+                try? await Task.sleep(nanoseconds: 1_800_000_000)
+                guard token == next else { return }
+                withAnimation(.easeOut(duration: 0.18)) { visible = false }
+            }
+        }
+    }
+}
+
+extension View {
+    func nativeCopyFeedback() -> some View { modifier(NativeCopyFeedbackModifier()) }
+}
+
 extension Color {
     static let linkSurface = Color(uiColor: .secondarySystemBackground)
     static let linkCanvas = Color(uiColor: .systemBackground)
@@ -67,6 +126,9 @@ struct NativeSelectableText: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(openURL: openURL) }
 
     func makeUIView(context: Context) -> SelectableMessageTextView {
+        #if LINK_SMOKE
+        NativeChatRenderMetrics.textCreations += 1
+        #endif
         let view = SelectableMessageTextView()
         view.backgroundColor = .clear
         view.isEditable = false
@@ -78,6 +140,9 @@ struct NativeSelectableText: UIViewRepresentable {
         view.font = .systemFont(ofSize: fontSize)
         view.textColor = textColor
         let styled = NSMutableAttributedString(value)
+        styled.enumerateAttribute(.font, in: NSRange(location: 0, length: styled.length)) { font, range, _ in
+            if font == nil { styled.addAttribute(.font, value: UIFont.systemFont(ofSize: fontSize), range: range) }
+        }
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = 5
         styled.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: styled.length))
@@ -89,21 +154,29 @@ struct NativeSelectableText: UIViewRepresentable {
         view.accessibilityIdentifier = accessibilityIdentifier
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         view.setContentHuggingPriority(.required, for: .vertical)
+        context.coordinator.value = value
         return view
     }
 
     func updateUIView(_ view: SelectableMessageTextView, context: Context) {
         context.coordinator.openURL = openURL
-        view.font = .systemFont(ofSize: fontSize)
-        view.textColor = textColor
+        if view.font?.pointSize != fontSize {
+            view.font = .systemFont(ofSize: fontSize)
+            context.coordinator.measured.removeAll(keepingCapacity: true)
+        }
+        if view.textColor != textColor { view.textColor = textColor }
         view.accessibilityIdentifier = accessibilityIdentifier
         let plainText = String(value.characters)
-        let textChanged = view.accessibilityLabel != plainText
-        view.accessibilityLabel = plainText
-        let value = NSAttributedString(value)
-        if textChanged {
+        if context.coordinator.value != value {
+            context.coordinator.value = value
+            context.coordinator.measured.removeAll(keepingCapacity: true)
+            view.accessibilityLabel = plainText
+            let value = NSAttributedString(value)
             let selected = view.selectedRange
             let styled = NSMutableAttributedString(attributedString: value)
+            styled.enumerateAttribute(.font, in: NSRange(location: 0, length: styled.length)) { font, range, _ in
+                if font == nil { styled.addAttribute(.font, value: UIFont.systemFont(ofSize: fontSize), range: range) }
+            }
             let paragraph = NSMutableParagraphStyle()
             paragraph.lineSpacing = 5
             styled.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: styled.length))
@@ -114,11 +187,25 @@ struct NativeSelectableText: UIViewRepresentable {
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: SelectableMessageTextView, context: Context) -> CGSize? {
         guard let width = proposal.width, width.isFinite else { return nil }
-        return uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        let category = uiView.traitCollection.preferredContentSizeCategory
+        if context.coordinator.measuredCategory != category {
+            context.coordinator.measuredCategory = category
+            context.coordinator.measured.removeAll(keepingCapacity: true)
+        }
+        if let size = context.coordinator.measured[width] { return size }
+        let size = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        context.coordinator.measured[width] = size
+        #if LINK_SMOKE
+        NativeChatRenderMetrics.textMeasurements += 1
+        #endif
+        return size
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {
         var openURL: OpenURLAction
+        var value: AttributedString?
+        var measured: [CGFloat: CGSize] = [:]
+        var measuredCategory: UIContentSizeCategory?
         init(openURL: OpenURLAction) { self.openURL = openURL }
         func textView(_ textView: UITextView, shouldInteractWith URL: URL, in characterRange: NSRange,
                       interaction: UITextItemInteraction) -> Bool {
@@ -137,6 +224,11 @@ final class SelectableMessageTextView: UITextView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    override func copy(_ sender: Any?) {
+        super.copy(sender)
+        NativeClipboard.confirmCopy()
+    }
+
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         action == #selector(copy(_:))
     }
@@ -154,7 +246,7 @@ struct NativeChatMarkdown: View {
                         HStack {
                             Text(block.language.isEmpty ? "代码" : block.language).font(.caption).foregroundStyle(.secondary)
                             Spacer()
-                            Button { UIPasteboard.general.string = block.content } label: { Label("复制", systemImage: "doc.on.doc").font(.caption) }.buttonStyle(.plain)
+                            Button { NativeClipboard.copy(block.content) } label: { Label("复制", systemImage: "doc.on.doc").font(.caption) }.buttonStyle(.plain)
                         }
                         if ["diff", "patch"].contains(block.language.trimmingCharacters(in: .whitespaces).lowercased()) {
                             NativeDiff(content: block.content, wrapsLines: diffLineWrapping)

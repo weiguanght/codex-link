@@ -177,9 +177,9 @@ struct NativeToolDetail: View {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Menu {
                         Toggle("自动换行", isOn: wrapsLines)
-                        Button("复制全部", systemImage: "doc.on.doc") { if let row { UIPasteboard.general.string = chat.rowText(row) } }
+                        Button("复制全部", systemImage: "doc.on.doc") { if let row { NativeClipboard.copy(chat.rowText(row)) } }
                         if let row, row.kind == "commandExecution" {
-                            Button("复制命令", systemImage: "terminal") { UIPasteboard.general.string = NativeToolPresentation(row: row, text: chat.rowText(row)).input }
+                            Button("复制命令", systemImage: "terminal") { NativeClipboard.copy(NativeToolPresentation(row: row, text: chat.rowText(row)).input) }
                         }
                     } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("详情选项")
                 }

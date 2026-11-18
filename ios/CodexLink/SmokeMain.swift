@@ -1,6 +1,25 @@
 // Test entry point exists only in a LINK_SMOKE simulator build.
 #if LINK_SMOKE
 import SwiftUI
+import Combine
+
+// Explicitly sampled by XCTest, with no timer or observation in release builds.
+enum NativeChatRenderMetrics {
+    static var pageBodies = 0
+    static var rowBodies = 0
+    static var textMeasurements = 0
+    static var cellConfigurations = 0
+    static var textCreations = 0
+    static var snapshot: String { "\(pageBodies),\(rowBodies),\(textMeasurements),\(cellConfigurations),\(textCreations)" }
+}
+struct NativeChatRenderMetricsView: View {
+    @State private var snapshot = ""
+    var body: some View {
+        Button { snapshot = NativeChatRenderMetrics.snapshot } label: {
+            Text("采样").font(.system(size: 9)).padding(4)
+        }.accessibilityIdentifier("native.performance.sample").accessibilityValue(snapshot)
+    }
+}
 
 @main
 struct SmokeMain: App {
@@ -115,44 +134,15 @@ final class NativeSmoke: ObservableObject {
         try require(NativeMarkdownTable.parse(["a|b", "not|separator"], at: 0) == nil, "Plain pipes became a table")
         let fenced = NativeMarkdownBlock.parse("````text\n" + rows.joined(separator: "\n") + "\n```\n````\n" + rows.joined(separator: "\n"))
         try require(fenced.filter { $0.table != nil }.count == 1 && fenced.first?.code == true && fenced.first?.content.contains("```") == true, "Tables leaked out of fenced code")
-        try require(NativeHistoryPull.shouldPrefetch(firstVisibleIndex: 8, movingOlder: true), "Near-top user scroll must prefetch")
-        try require(!NativeHistoryPull.shouldPrefetch(firstVisibleIndex: 9, movingOlder: true), "Distant scroll must not prefetch")
-        try require(!NativeHistoryPull.shouldPrefetch(firstVisibleIndex: 2, movingOlder: false), "Passive changes must not prefetch")
-        try require(abs(NativeHistoryPull.damped(100) - 40) < 0.01, "History pull must damp 100pt to 40pt")
-        try require(NativeHistoryPull.damped(0) == 0, "History pull idle distance must be zero")
-        // Real UIKit geometry: prepend twenty unequal-height messages and verify
-        // both exact contentOffset compensation and the original message's pixels.
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 600))
-        let host = UIViewController(); window.rootViewController = host
-        let scroll = UIScrollView(frame: window.bounds)
-        scroll.contentInsetAdjustmentBehavior = .never
-        host.view.addSubview(scroll); window.isHidden = false
-        defer { window.isHidden = true }
-        let controller = NativeHistoryScrollController()
-        let keys = (0..<50).map { "anchor-\($0)" }
-        controller.configure(identity: "synthetic-anchor", enabled: false, keys: keys, onLoad: {}, onDragging: { _ in })
-        let probe = UIView(frame: .zero); scroll.addSubview(probe); controller.attach(probe)
-        let markers = keys.enumerated().map { index, key -> UIView in
-            let row = UIView(frame: CGRect(x: 0, y: index * 80, width: 320, height: 80))
-            scroll.addSubview(row); controller.register(key, view: row); return row
-        }
-        scroll.contentSize = CGSize(width: 320, height: 4000)
-        // The response arrives after the reader has already moved further up.
-        scroll.contentOffset.y = 1073
-        controller.captureAnchor()
-        let visible = markers[13]
-        let originalY = visible.convert(visible.bounds, to: window).minY
-        let insertedHeight = (0..<20).reduce(CGFloat(0)) { $0 + CGFloat(47 + $1 * 3) }
-        for marker in markers { marker.frame.origin.y += insertedHeight }
-        scroll.contentSize.height += insertedHeight
-        controller.finish()
-        try require(abs(scroll.contentOffset.y - (1073 + insertedHeight)) < 0.25, "Prepending history did not compensate the exact inserted height")
-        try require(abs(visible.convert(visible.bounds, to: window).minY - originalY) < 0.25, "History prepend moved the visible message in screen pixels")
-        // A second lazy-layout correction must preserve that same viewport too.
-        for marker in markers { marker.frame.origin.y += 37 }
-        scroll.contentSize.height += 37; controller.finish()
-        try require(abs(visible.convert(visible.bounds, to: window).minY - originalY) < 0.25, "Late row measurement moved the history anchor")
-        controller.releaseAnchor(); controller.detach()
+        let isolated = ChatModel(api: api)
+        var transcriptNotifications = 0, composerNotifications = 0
+        let transcriptWatch = isolated.objectWillChange.sink { transcriptNotifications += 1 }
+        let composerWatch = isolated.composer.objectWillChange.sink { composerNotifications += 1 }
+        for _ in 0..<500 { isolated.draft.text.append("a") }
+        isolated.draft.skills = ["synthetic"]
+        try require(transcriptNotifications == 0 && composerNotifications == 501, "Keystrokes invalidated the transcript instead of only the composer")
+        try require(isolated.draft.text.count == 500 && isolated.composer.value.skills == ["synthetic"], "Isolated composer lost edits")
+        withExtendedLifetime((transcriptWatch, composerWatch)) {}
         let context = NativeContextUsage(json(["usedTokens": .number(24000), "windowTokens": .number(128000)]))
         try require(context?.placeholder == "24K / 128K（18.8%）", "Context placeholder counts or percentage are wrong")
         let selectableMessage = SelectableMessageTextView()
@@ -161,6 +151,9 @@ final class NativeSmoke: ObservableObject {
         try require(selectableMessage.isSelectable, "Message text must support native selection")
         try require(selectableMessage.canPerformAction(#selector(UIResponder.copy(_:)), withSender: nil), "Message text must allow copying")
         try require(!selectableMessage.canPerformAction(#selector(UIResponder.paste(_:)), withSender: nil), "Message text must reject pasting")
+        try require(NativeSendMode.resolve("steer", running: false) == "send", "Steer should use ordinary send after the task ends")
+        try require(NativeSendMode.resolve("steer", running: true) == "steer", "Steer should remain available during an active task")
+        try require(NativeSendMode.isFinishedTaskError("当前任务已经结束，请使用普通发送"), "Finished-task response was not recognized for fallback")
         for (count, expected) in [(999, "999"), (1000, "1K"), (13679, "13.7K"), (999500, "1M"), (1250000, "1.25M")] {
             try require(NativeTokenCount.format(count) == expected, "Compact Token formatting failed for \(count)")
         }
@@ -376,14 +369,36 @@ final class NativeSmoke: ObservableObject {
                 let after = try await api.value("/api/sessions/\(desktop.id)/catalog")
                 try require(after["sendCount"].int == 2 && after["lastAttemptCount"].int == 2, "Retry changed idempotency key")
                 resumed.draft.sendMode = "send"
+                resumed.meta = json(resumed.meta.object.merging(["status": string("active")]) { _, new in new })
                 resumed.draft.text = "Synthetic one-off queued message"
                 await resumed.send(mode: "queue")
                 let overrideMode = try await api.value("/api/sessions/\(desktop.id)/catalog")
                 try require(overrideMode["lastSendMode"].string == "queue" && resumed.draft.sendMode == "send", "One-off send changed the default or ignored the chosen mode")
+                resumed.meta = json(resumed.meta.object.merging(["status": string("idle")]) { _, new in new })
                 resumed.draft.text = "Synthetic default send after override"
                 await resumed.send()
                 let defaultMode = try await api.value("/api/sessions/\(desktop.id)/catalog")
                 try require(defaultMode["lastSendMode"].string == "send", "Single tap did not restore default send mode")
+                resumed.draft.sendMode = "steer"
+                resumed.draft.text = "Synthetic idle follow-up"
+                await resumed.send()
+                let idleFollowUp = try await api.value("/api/sessions/\(desktop.id)/catalog")
+                try require(idleFollowUp["lastSendMode"].string == "send" && resumed.draft.text.isEmpty && resumed.draft.sendMode == "steer", "Finished task did not send normally while preserving follow-up preference")
+                resumed.meta = json(resumed.meta.object.merging(["status": string("active")]) { _, new in new })
+                resumed.draft.text = "Synthetic finished steer race"
+                await resumed.send()
+                let racedFollowUp = try await api.value("/api/sessions/\(desktop.id)/catalog")
+                try require(racedFollowUp["rejectedSteers"].int == 1 && racedFollowUp["lastSendMode"].string == "send" && resumed.draft.text.isEmpty && resumed.error.isEmpty, "Finished-task race did not fall back to an ordinary send")
+                resumed.meta = json(resumed.meta.object.merging(["status": string("active")]) { _, new in new })
+                resumed.draft.text = "Synthetic pending steer"
+                await resumed.send()
+                let pendingSteerID = resumed.draft.attempt?.id
+                try require(pendingSteerID != nil && resumed.draft.attempt?.payload["mode"].string == "steer", "Pending steering submission did not retain its payload")
+                resumed.meta = json(resumed.meta.object.merging(["status": string("idle")]) { _, new in new })
+                await resumed.send()
+                let retriedSteer = try await api.value("/api/sessions/\(desktop.id)/catalog")
+                try require(retriedSteer["lastSendMode"].string == "steer" && retriedSteer["lastAttemptCount"].int == 2 && resumed.draft.text.isEmpty, "Task completion changed an unconfirmed steering request instead of retrying its ID")
+                resumed.draft.sendMode = "send"
                 try await resumed.stop()
                 if let request = resumed.requests.first { try await resumed.respond(request, response: json(["decision": string("decline")])) }
                 resumed.draft.text = "Forget while a save is pending"
@@ -393,6 +408,7 @@ final class NativeSmoke: ObservableObject {
                 resumedTask.cancel()
                 checks.append("relaunch without replay + stable retry ID + acknowledged cleanup + forget cancels save")
                 checks.append("native send + uncertain retry ID + stop + approval response")
+                checks.append("idle follow-up sends normally + finished-task race fallback + uncertain steering retry retains ID")
             }
             if let desktop = workspace.sessions.first(where: { $0.readOnly != true }) {
                 try await workspace.preferences([desktop], changes: ["pinned": .bool(true), "unread": .bool(true)])

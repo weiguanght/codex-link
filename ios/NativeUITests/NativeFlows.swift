@@ -8,6 +8,66 @@ final class NativeFlows: XCTestCase {
         XCTAssertTrue(app.buttons["native.workspace.open"].waitForExistence(timeout: 5))
     }
 
+    func testNewChatOptionsAndUserMessageCopy() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "local.codex.link")
+        for key in ["PORT", "PIN", "ID"] {
+            let name = "LINK_SMOKE_" + key
+            app.launchEnvironment[name] = ProcessInfo.processInfo.environment[name]
+        }
+        app.launchEnvironment["LINK_SMOKE_UI"] = "1"
+        app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN", "-native.followUpBehavior", "send"]
+        app.launch()
+        let prompt = app.descendants(matching: .any).matching(identifier: "native.home.prompt").firstMatch
+        XCTAssertTrue(prompt.waitForExistence(timeout: 40))
+        prompt.tap(); prompt.typeText("Synthetic creation from home")
+        app.buttons["native.home.create"].tap()
+        let title = app.textFields["native.chat.title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 8))
+        title.tap(); title.typeText("Custom mobile title")
+        app.buttons["native.chat.project"].tap()
+        XCTAssertTrue(app.buttons["不选择项目"].waitForExistence(timeout: 5))
+        app.buttons["不选择项目"].tap()
+        XCTAssertTrue(app.buttons["native.chat.create"].isEnabled)
+        app.buttons["native.chat.model"].tap()
+        XCTAssertTrue(app.buttons["Test model"].waitForExistence(timeout: 5))
+        app.buttons["Test model"].tap()
+        app.swipeUp()
+        app.buttons["native.chat.approval"].tap()
+        app.buttons["按请求审批"].tap()
+        app.buttons["native.chat.sandbox"].tap()
+        app.buttons["工作区可写"].tap()
+        capture("New chat custom title, optional project, model and permission choices")
+        app.buttons["native.chat.create"].tap()
+        let composer = app.descendants(matching: .any).matching(identifier: "native.composer").firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 15))
+        let empty = NSPredicate { _, _ in
+            let value = composer.value as? String ?? ""
+            return value.isEmpty || value == composer.placeholderValue
+        }
+        expectation(for: empty, evaluatedWith: composer)
+        waitForExpectations(timeout: 15)
+        let longMessage = (["Synthetic long user message"] + (1...8).map { "Line \($0): copy every line of the original message." }).joined(separator: "\n")
+        composer.tap(); composer.typeText(longMessage)
+        app.buttons["native.send"].tap()
+        expectation(for: empty, evaluatedWith: composer)
+        waitForExpectations(timeout: 10)
+        let transcript = app.descendants(matching: .any).matching(identifier: "native.transcript").firstMatch
+        for _ in 0..<5 { transcript.swipeDown() }
+        let body = app.staticTexts["native.message.user.text"]
+        XCTAssertTrue(body.waitForExistence(timeout: 8))
+        XCTAssertLessThan(body.frame.height, 150, "A long user message should be collapsed to five lines")
+        XCTAssertFalse(app.textViews["native.message.selectable.user"].exists)
+        let expand = app.buttons["native.message.user.expand"]
+        XCTAssertTrue(expand.exists)
+        expand.tap()
+        XCTAssertGreaterThan(body.frame.height, 150)
+        expand.tap()
+        app.buttons["native.message.copy.user"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["native.copy.feedback"].waitForExistence(timeout: 3))
+        capture("Five-line user message and centered copy confirmation")
+    }
+
     func testChatMenuContextAndSendHold() throws {
         continueAfterFailure = false
         let app = XCUIApplication(bundleIdentifier: "local.codex.link")
@@ -90,9 +150,32 @@ final class NativeFlows: XCTestCase {
         app.buttons["永久删除…"].tap()
         XCTAssertTrue(app.staticTexts["永久删除此会话？"].waitForExistence(timeout: 5))
         app.buttons["取消"].tap()
+        desktop.tap()
+        let transcript = app.descendants(matching: .any).matching(identifier: "native.transcript").firstMatch
+        XCTAssertTrue(transcript.waitForExistence(timeout: 10))
+        for _ in 0..<4 { transcript.swipeDown() }
+        let firstMessage = app.cells["native.message.row.u1"]
+        XCTAssertTrue(firstMessage.waitForExistence(timeout: 5))
+        XCTAssertEqual(firstMessage.frame.minY, transcript.frame.minY, accuracy: 2,
+                       "The first message should start at the transcript top, without a floating blank inset")
+        let firstMessageText = app.staticTexts["native.message.user.text"]
+        XCTAssertTrue(firstMessageText.waitForExistence(timeout: 5))
+        XCTAssertLessThanOrEqual(firstMessageText.frame.minY, transcript.frame.minY + 50,
+                                 "The message content should align to the top of its reusable cell")
+        XCTAssertFalse(app.textViews["native.message.selectable.user"].exists, "User messages should not share model-message selection behavior")
+        XCTAssertTrue(app.buttons["native.message.copy.user"].exists, "User messages need a one-tap copy action")
+        app.buttons["native.message.copy.user"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["native.copy.feedback"].waitForExistence(timeout: 2), "Copy should show a centered confirmation")
+        capture("Transcript begins directly under the navigation bar")
+        XCTAssertTrue(app.buttons["native.chat.back"].exists)
+        let startAtTop = app.coordinate(withNormalizedOffset: CGVector(dx: 0.002, dy: 0.45))
+        startAtTop.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.20, dy: 0.45)), withVelocity: .slow, thenHoldForDuration: 0.2)
+        XCTAssertTrue(app.buttons["native.chat.back"].exists, "A slow swipe below 38% should cancel")
+        startAtTop.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.45)), withVelocity: .slow, thenHoldForDuration: 0)
+        XCTAssertTrue(desktop.waitForExistence(timeout: 5), "A swipe over 38% should return")
         for _ in 0..<3 {
             desktop.tap()
-            XCTAssertTrue(app.scrollViews["native.transcript"].waitForExistence(timeout: 10))
+            XCTAssertTrue(transcript.waitForExistence(timeout: 10))
             XCTAssertTrue(app.buttons["native.chat.back"].waitForExistence(timeout: 5))
             let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.002, dy: 0.45))
             start.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.20, dy: 0.45)), withVelocity: .slow, thenHoldForDuration: 0.2)
@@ -119,7 +202,7 @@ final class NativeFlows: XCTestCase {
         app.launch()
         let session = app.buttons["native.home.session.00000000-0000-0000-0000-000000000002"]
         XCTAssertTrue(session.waitForExistence(timeout: 40)); session.tap()
-        let transcript = app.scrollViews["native.transcript"]
+        let transcript = app.descendants(matching: .any).matching(identifier: "native.transcript").firstMatch
         let change = app.buttons["native.tool.f1"]
         XCTAssertTrue(change.waitForExistence(timeout: 10))
         for _ in 0..<6 { if change.isHittable { break }; transcript.swipeDown() }
@@ -147,10 +230,67 @@ final class NativeFlows: XCTestCase {
         nested.tap()
         XCTAssertTrue(app.staticTexts["working nested"].waitForExistence(timeout: 8))
         capture("Selected nested repository patch")
-        app.buttons["返回"].tap()
+        app.buttons["返回"].firstMatch.tap()
         app.buttons["完成"].tap()
 
         verifySilentHistoryPrefetch(app: app, transcript: transcript)
+    }
+
+    func testTypingAndScrollingRenderIsolation() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "local.codex.link")
+        for key in ["PORT", "PIN", "ID"] {
+            let name = "LINK_SMOKE_" + key
+            app.launchEnvironment[name] = ProcessInfo.processInfo.environment[name]
+        }
+        app.launchEnvironment["LINK_SMOKE_UI"] = "1"
+        app.launchEnvironment["LINK_SMOKE_RENDER_METRICS"] = "1"
+        app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        app.launch()
+        let session = app.buttons["native.home.session.00000000-0000-0000-0000-000000000002"]
+        XCTAssertTrue(session.waitForExistence(timeout: 40)); session.tap()
+        let composer = app.descendants(matching: .any).matching(identifier: "native.composer").firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 10))
+        composer.tap(); composer.typeText("Synthetic rendering regression")
+        app.buttons["native.send"].tap()
+        let tail = app.textViews.matching(NSPredicate(format: "label BEGINSWITH %@", "Render message 79:")).firstMatch
+        XCTAssertTrue(tail.waitForExistence(timeout: 10))
+        composer.tap()
+        Thread.sleep(forTimeInterval: 2)
+        let sample = app.buttons["native.performance.sample"]
+        func counts() -> [Int] {
+            sample.tap()
+            return (sample.value as? String ?? "").split(separator: ",").compactMap { Int($0) }
+        }
+        let before = counts()
+        XCTAssertEqual(before.count, 5)
+        let draft = String(repeating: "Typing must not rebuild history. ", count: 8)
+        composer.typeText(draft)
+        Thread.sleep(forTimeInterval: 2) // Includes draft persistence and empty polls.
+        let typed = counts()
+        XCTAssertEqual(typed.count, 5)
+        // Growing the composer can change which reusable cells are visible.
+        // Once its seven-line height is reached, keystrokes must do no transcript work.
+        composer.typeText(draft)
+        Thread.sleep(forTimeInterval: 2)
+        let steady = counts()
+        XCTAssertEqual(steady.count, 5)
+        let typingReport = XCTAttachment(string: "before=\(before), growing composer=\(typed), steady height=\(steady)")
+        typingReport.name = "Typing render counts"; typingReport.lifetime = .keepAlways; add(typingReport)
+        XCTAssertLessThanOrEqual(typed[0] - before[0], 10, "Each keystroke invalidated the whole chat page")
+        XCTAssertEqual(steady[1], typed[1], "Typing at stable composer height rebuilt message bodies")
+        XCTAssertLessThanOrEqual(steady[0] - typed[0], 2, "Each keystroke invalidated the whole chat page")
+        XCTAssertEqual(steady[2], typed[2], "Typing at stable composer height remeasured transcript text")
+        let transcript = app.descendants(matching: .any).matching(identifier: "native.transcript").firstMatch
+        for _ in 0..<4 {
+            let start = transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.25))
+            start.press(forDuration: 0.05, thenDragTo: transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.75)))
+        }
+        let scrolled = counts()
+        XCTAssertLessThanOrEqual(scrolled[0] - steady[0], 12, "Scroll pixels invalidated the whole chat page")
+        let report = "before=\(before), growing composer=\(typed), steady height=\(steady), after scrolling=\(scrolled)"
+        let attachment = XCTAttachment(string: report); attachment.name = "Transcript render counts"; attachment.lifetime = .keepAlways; add(attachment)
+        capture("Long draft and scrolling with isolated composer and unchanged-message rendering")
     }
 
     func testSilentHistoryPrefetch() throws {
@@ -165,7 +305,7 @@ final class NativeFlows: XCTestCase {
         app.launch()
         let session = app.buttons["native.home.session.00000000-0000-0000-0000-000000000002"]
         XCTAssertTrue(session.waitForExistence(timeout: 40)); session.tap()
-        let transcript = app.scrollViews["native.transcript"]
+        let transcript = app.descendants(matching: .any).matching(identifier: "native.transcript").firstMatch
         XCTAssertTrue(transcript.waitForExistence(timeout: 10))
         verifySilentHistoryPrefetch(app: app, transcript: transcript)
     }
@@ -195,6 +335,52 @@ final class NativeFlows: XCTestCase {
         capture("Automatic history reaches the first message")
     }
 
+    func testHistoryPrependKeepsVisibleMessage() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "local.codex.link")
+        for key in ["PORT", "PIN", "ID"] {
+            let name = "LINK_SMOKE_" + key
+            app.launchEnvironment[name] = ProcessInfo.processInfo.environment[name]
+        }
+        app.launchEnvironment["LINK_SMOKE_UI"] = "1"
+        app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        app.launch()
+        let session = app.buttons["native.home.session.00000000-0000-0000-0000-000000000002"]
+        XCTAssertTrue(session.waitForExistence(timeout: 40)); session.tap()
+        let transcript = app.descendants(matching: .any).matching(identifier: "native.transcript").firstMatch
+        XCTAssertTrue(transcript.waitForExistence(timeout: 10))
+        let composer = app.descendants(matching: .any).matching(identifier: "native.composer").firstMatch
+        composer.tap(); composer.typeText("Synthetic pagination anchor regression")
+        app.buttons["native.send"].tap()
+        let messages = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Auto history "))
+        XCTAssertTrue(messages.firstMatch.waitForExistence(timeout: 10))
+        let boundary = app.cells["native.message.row.page-20"]
+        var reachedBoundary = false
+        for _ in 0..<45 {
+            let start = transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.3))
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 140)), withVelocity: .slow, thenHoldForDuration: 0.3)
+            // Stop as soon as the eight-row prefetch boundary is crossed. The
+            // fixture holds the response so the gesture can settle first.
+            if !boundary.exists { continue }
+            let frame = boundary.frame
+            let viewport = transcript.frame
+            print("History boundary screen frame: \(frame); viewport: \(viewport)")
+            if frame.maxY > viewport.minY + 10 && frame.minY < viewport.midY {
+                reachedBoundary = true; break
+            }
+        }
+        XCTAssertTrue(reachedBoundary, "Did not reach the prefetch boundary")
+        let y = boundary.frame.minY
+        Thread.sleep(forTimeInterval: 6)
+        let retained = app.cells["native.message.row.page-20"]
+        XCTAssertTrue(retained.exists, "Prepending history evicted the reading anchor")
+        XCTAssertEqual(retained.frame.minY, y, accuracy: 2, "History response moved the visible message")
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertEqual(retained.frame.minY, y, accuracy: 2, "Late text measurement moved the visible message")
+        print("History prepend anchor: before=\(y), after=\(retained.frame.minY)")
+        capture("Delayed history prepend retains the same message at the same screen Y")
+    }
+
     func testToolDetailsAndWrapping() throws {
         continueAfterFailure = false
         let app = XCUIApplication(bundleIdentifier: "local.codex.link")
@@ -207,7 +393,7 @@ final class NativeFlows: XCTestCase {
         app.launch()
         let session = app.buttons["native.home.session.00000000-0000-0000-0000-000000000002"]
         XCTAssertTrue(session.waitForExistence(timeout: 40)); session.tap()
-        let transcript = app.scrollViews["native.transcript"]
+        let transcript = app.descendants(matching: .any).matching(identifier: "native.transcript").firstMatch
         let command = app.buttons["native.tool.t1"]
         XCTAssertTrue(command.waitForExistence(timeout: 10))
         for _ in 0..<6 { if command.isHittable { break }; transcript.swipeDown() }
@@ -300,7 +486,7 @@ final class NativeFlows: XCTestCase {
         composer.tap(); composer.typeText("Synthetic scroll regression")
         app.buttons["native.send"].tap()
         XCTAssertTrue(app.staticTexts["History reading baseline"].waitForExistence(timeout: 10))
-        let transcript = app.scrollViews["native.transcript"]
+        let transcript = app.descendants(matching: .any).matching(identifier: "native.transcript").firstMatch
         XCTAssertTrue(transcript.exists)
         for _ in 0..<4 { transcript.swipeDown() }
         let history = try XCTUnwrap(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "History entry")).allElementsBoundByIndex.first { $0.isHittable })
@@ -382,7 +568,7 @@ final class NativeFlows: XCTestCase {
         codeEditor.tap(); codeEditor.typeText("\n// Native editor save")
         app.buttons["native.workspace.save"].tap()
         XCTAssertTrue(app.staticTexts["native.workspace.save.status"].waitForExistence(timeout: 8))
-        app.buttons["返回"].tap()
+        app.buttons["返回"].firstMatch.tap()
         app.buttons["将路径带回输入框"].tap()
         XCTAssertTrue(composer.waitForExistence(timeout: 8))
         XCTAssertTrue((composer.value as? String)?.contains("Retained workspace draft\n\nSources/example.swift") == true)
@@ -423,6 +609,13 @@ final class NativeFlows: XCTestCase {
         XCTAssertTrue(app.buttons["native.home.create"].waitForExistence(timeout: 8))
 
         app.buttons["native.sidebar"].tap()
+        XCTAssertTrue(app.buttons["native.newChat"].waitForExistence(timeout: 10))
+        app.buttons["native.newChat"].tap()
+        XCTAssertTrue(app.textFields["native.chat.title"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.descendants(matching: .any)["native.chat.model"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["native.chat.approval"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["native.chat.sandbox"].exists)
+        app.buttons["取消"].tap()
         XCTAssertTrue(app.buttons["native.newProject"].waitForExistence(timeout: 10))
         app.buttons["native.newProject"].tap()
         let name = app.textFields["native.project.name"]
@@ -436,7 +629,7 @@ final class NativeFlows: XCTestCase {
         app.buttons["native.project.save"].tap()
         XCTAssertTrue(app.buttons["native.newChat"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.alerts["操作失败"].exists)
-        app.swipeDown()
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.925, dy: 0.1)).tap()
         capture("Native workspace")
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "FAIL:")).firstMatch.exists)
     }
@@ -463,7 +656,7 @@ final class NativeFlows: XCTestCase {
         XCTAssertTrue(app.buttons["取消置顶"].waitForExistence(timeout: 5))
         app.buttons["标为未读"].tap()
         session.tap()
-        XCTAssertTrue(app.scrollViews["native.transcript"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "native.transcript").firstMatch.waitForExistence(timeout: 10))
         let toolbarActions = app.buttons["native.session.actions." + identifier]
         openChatMenu(app)
         XCTAssertTrue(toolbarActions.waitForExistence(timeout: 5))
@@ -488,7 +681,7 @@ final class NativeFlows: XCTestCase {
         XCTAssertTrue(app.staticTexts["永久删除此会话？"].waitForExistence(timeout: 5))
         capture("Permanent delete requires an explicit confirmation")
         app.buttons["取消"].tap()
-        XCTAssertTrue(app.scrollViews["native.transcript"].exists)
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "native.transcript").firstMatch.exists)
         XCTAssertFalse(app.alerts["操作失败"].exists)
         XCTAssertTrue(app.buttons["native.chat.back"].exists)
         app.buttons["native.chat.back"].tap()
@@ -508,7 +701,7 @@ final class NativeFlows: XCTestCase {
         app.launch()
         let session = app.buttons["native.home.session.00000000-0000-0000-0000-000000000002"]
         XCTAssertTrue(session.waitForExistence(timeout: 40)); session.tap()
-        let transcript = app.scrollViews["native.transcript"]
+        let transcript = app.descendants(matching: .any).matching(identifier: "native.transcript").firstMatch
         XCTAssertTrue(transcript.waitForExistence(timeout: 10))
         let table = app.scrollViews["native.markdown.table"].firstMatch
         for _ in 0..<8 { if table.isHittable { break }; transcript.swipeUp() }
@@ -540,7 +733,12 @@ final class NativeFlows: XCTestCase {
         let done = app.navigationBars.buttons["完成"]
         XCTAssertTrue(done.waitForExistence(timeout: 5)); done.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let markdown = app.buttons["native.chat.file.longest-conversation-document.md"]
-        XCTAssertTrue(markdown.waitForExistence(timeout: 5)); markdown.tap()
+        XCTAssertTrue(markdown.waitForExistence(timeout: 5))
+        for _ in 0..<4 {
+            if markdown.isHittable && markdown.frame.maxY < app.buttons["native.attachment.menu"].frame.minY - 12 { break }
+            transcript.swipeUp()
+        }
+        markdown.tap()
         XCTAssertTrue(app.scrollViews["native.file.preview.markdown"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.scrollViews["native.markdown.table"].firstMatch.exists)
         app.navigationBars.buttons["完成"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()

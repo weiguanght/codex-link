@@ -98,12 +98,23 @@ def _runtime_operation(executable, codex_home, cwd, operation):
     return result
 
 
-def create_empty(executable, codex_home, cwd, title):
+def create_empty(executable, codex_home, cwd, title, settings=None):
+    settings = settings or {}
     def create(request):
-        result = request('thread/start', {'cwd': cwd, 'ephemeral': False})
+        params = {'cwd': cwd, 'ephemeral': False}
+        if settings.get('model'):
+            params['model'] = settings['model']
+        if settings.get('effort'):
+            params['config'] = {'model_reasoning_effort': settings['effort']}
+        if settings.get('approvalPolicy'):
+            params['approvalPolicy'] = settings['approvalPolicy']
+        if settings.get('sandbox'):
+            params['sandbox'] = settings['sandbox']
+        result = request('thread/start', params)
         thread_id = result['thread']['id']
         uuid.UUID(thread_id)
-        request('thread/name/set', {'threadId': thread_id, 'name': title})
+        if title:
+            request('thread/name/set', {'threadId': thread_id, 'name': title})
         request('thread/read', {'threadId': thread_id, 'includeTurns': True})
         return thread_id
     return _runtime_operation(executable, codex_home, cwd, create)

@@ -202,7 +202,7 @@ struct NativeWorkspaceBrowser: View {
                 case .failure(let error): model.openError = error.localizedDescription
                 }
             }
-        }
+        }.nativeCopyFeedback()
     }
     private var browserContent: some View {
         VStack(spacing: 0) {
@@ -283,7 +283,7 @@ struct NativeWorkspaceBrowser: View {
                         }
                     }.disabled(entry.kind == "unavailable").accessibilityIdentifier("native.workspace.entry.\(entry.path)")
                     .contextMenu {
-                        Button("复制路径", systemImage: "doc.on.doc") { UIPasteboard.general.string = entry.path }
+                        Button("复制路径", systemImage: "doc.on.doc") { NativeClipboard.copy(entry.path) }
                         Button("将路径带回输入框", systemImage: "text.badge.plus") { insertPath(entry.path) }
                     }
                 }
@@ -451,8 +451,8 @@ struct NativeWorkspaceDocument: View {
                     else { Button("编辑") { editing = true }.accessibilityIdentifier("native.workspace.edit") }
                 }
                 Menu {
-                    Button("复制路径", systemImage: "doc.on.doc") { UIPasteboard.general.string = document.path }
-                    Button("复制全文", systemImage: "doc.on.doc") { UIPasteboard.general.string = draft }
+                    Button("复制路径", systemImage: "doc.on.doc") { NativeClipboard.copy(document.path) }
+                    Button("复制全文", systemImage: "doc.on.doc") { NativeClipboard.copy(draft) }
                     Toggle("自动换行", isOn: $wrapsLines)
                     if !document.isDiff { Button("重新读取文件", systemImage: "arrow.clockwise") { leave("reload") }.disabled(busy) }
                 } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("文件操作")

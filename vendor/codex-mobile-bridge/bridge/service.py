@@ -353,36 +353,53 @@ class Bridge:
         target.replace(self.creations_path)
 
     @operation
-    def create_chat(self, project_key, title, request_id):
+    def create_chat(self, project_key, title, request_id, settings=None):
         if not isinstance(request_id, str):
             raise ValueError('创建请求标识无效')
         uuid.UUID(request_id)
-        if not isinstance(title, str) or not title.strip() or len(title) > 120:
-            raise ValueError('请输入 1–120 字的聊天名称')
-        project = next((p for p in self.hosts.projects() if p['key'] == project_key), None)
-        if project is None:
+        if title is None:
+            title = ''
+        if not isinstance(title, str) or len(title) > 120:
+            raise ValueError('聊天名称不能超过 120 字')
+        project_key = project_key or None
+        project = next((p for p in self.hosts.projects() if p['key'] == project_key), None) if project_key else None
+        if project_key and project is None:
             raise ValueError('请选择电脑 App 中已保存的项目')
+        if project is None:
+            project = {'key': None, 'cwd': str(Path.home()), 'host': 'local'}
+        if settings is None:
+            settings = {}
+        if not isinstance(settings, dict) or set(settings) - {'model', 'effort', 'approvalPolicy', 'sandbox'}:
+            raise ValueError('新会话设置无效')
+        settings = {key: value for key, value in settings.items() if value not in (None, '')}
+        if ('model' in settings and (not isinstance(settings['model'], str) or
+                not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_./:@+-]{0,199}', settings['model'])) or
+                'effort' in settings and (not isinstance(settings['effort'], str) or
+                not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,79}', settings['effort'])) or
+                'approvalPolicy' in settings and settings['approvalPolicy'] not in ('untrusted', 'on-request', 'on-failure', 'never') or
+                'sandbox' in settings and settings['sandbox'] not in ('read-only', 'workspace-write', 'danger-full-access')):
+            raise ValueError('新会话模型或权限选项无效')
         title = title.strip()
         with self.create_lock:
             entry = self.creations.get(request_id)
             if entry:
-                if entry['project'] != project_key or entry['title'] != title:
+                if entry['project'] != project_key or entry['title'] != title or entry.get('settings', {}) != settings:
                     raise ValueError('同一创建请求不能用于不同内容')
                 if not entry.get('id'):
                     raise CreationError('上次创建结果尚不确定，请先刷新聊天列表并检查电脑 App，避免重复创建')
             else:
                 self.ipc.connect()
-                entry = {'project': project_key, 'title': title, 'host': project['host'], 'at': time.time()}
+                entry = {'project': project_key, 'title': title, 'settings': settings, 'host': project['host'], 'at': time.time()}
                 self.creations[request_id] = entry
                 self._save_creations()
                 if project['host'] == 'local':
-                    thread_id = create_empty(self.catalog_reader.executable, self.codex_home, project['cwd'], title)
+                    thread_id = create_empty(self.catalog_reader.executable, self.codex_home, project['cwd'], title, settings)
                 else:
                     host = self.hosts.hosts()[project['host']]
                     source = Path(__file__).with_name('create.py').read_text(encoding='utf-8')
                     source += '\nimport shutil\nhome=Path(os.environ.get("CODEX_HOME", str(Path.home()/".codex")))\n'
                     source += 'runtime=shutil.which("codex") or str(Path.home()/".local/bin/codex")\n'
-                    source += 'print(json.dumps({"id":create_empty(runtime, home, **' + payload({'cwd': project['cwd'], 'title': title}) + ')}))\n'
+                    source += 'print(json.dumps({"id":create_empty(runtime, home, **' + payload({'cwd': project['cwd'], 'title': title, 'settings': settings}) + ')}))\n'
                     thread_id = ssh_read(host['alias'], source, timeout=90)['id']
                 uuid.UUID(thread_id)
                 entry['id'] = thread_id

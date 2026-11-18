@@ -18,6 +18,7 @@ from .network import origin
 from . import web_ui
 from . import history_http
 from .history_catalog import ReadingLibrary
+from .desktop_store import DesktopSessionStore
 from .workspace import Workspace, ProjectHosts
 from . import workspace_http
 from .settings import CodexSettings
@@ -159,6 +160,8 @@ class LinkServer(GatewayServer):
         self.reading = None
         self.codex_settings = None
         if getattr(bridge, 'codex_home', None) is not None:
+            if getattr(bridge, 'host', 'local') == 'local':
+                bridge.store = DesktopSessionStore(bridge.codex_home)
             # A loopback fixture may share the same bridge between listeners.
             self.workspace = bridge.hosts.workspace if isinstance(bridge.hosts, ProjectHosts) else Workspace(directory, bridge.hosts)
             bridge.hosts = ProjectHosts(self.workspace)

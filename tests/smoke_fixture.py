@@ -91,10 +91,15 @@ class NativeFixture(SpyBridge):
         self.connected = True
         self.scroll_started = None
         self.pagination = False
+        self.pagination_delay = 0
+        self.rendering = False
         self.scroll_stage = 0
         self.model = 'gpt-5.4'
         self.effort = 'high'
         self.last_send_mode = None
+        self.rejected_steers = 0
+        self.last_creation = None
+        self.user_message = '请完善远程会话的原生界面。'
     def session(self, key, **_):
         self.store.get(key)
         return self.live.setdefault(key, LiveSession(key))
@@ -106,7 +111,11 @@ class NativeFixture(SpyBridge):
         return self.message_actions[identifier]
     def activity(self, _): return []
     def timeline_read(self, key, mode='page', **options):
-        rows = [dict(key='u1', role='user', kind='userMessage', text='请完善远程会话的原生界面。', order=0, version='v1', truncated=False, editable=True),
+        if mode == 'page' and not options.get('before'):
+            self.pagination = False
+            self.pagination_delay = 0
+            self.rendering = False
+        rows = [dict(key='u1', role='user', kind='userMessage', text=self.user_message, order=0, version=str(len(self.user_message)), truncated=False, editable=True),
                 dict(key='t1', role='activity', kind='commandExecution', title='检查项目结构', text='rg --files ios/CodexLink', inputLength=len('rg --files ios/CodexLink'), status='completed', exitCode=0, durationMs=125, order=1, version='v1', truncated=True),
                 dict(key='a1', role='assistant', kind='agentMessage', text='已经梳理了项目、会话与输入区的交互。\n\n## 本次调整\n- 项目和任务分组\n- 原生消息流与执行状态\n- 输入区和审批操作\n\n```swift\nlet client = NativeAPI()\n```\n\n```diff\n--- a/example.swift\n+++ b/example.swift\n@@ -1 +1 @@\n-oldValue\n+newValueWithAnIntentionallyLongLineForNativeDiffWrappingInTheIOSConversation\n```', order=2, version='v1', truncated=False, forkable=True)]
         rows[2]['text'] += f'\n\n[新版 IPA](<{artifact_path}>)'
@@ -142,33 +151,60 @@ class NativeFixture(SpyBridge):
             cursor = options.get('before') if mode == 'page' else options.get('start')
             start = int(cursor.split('page-')[-1]) if cursor and 'page-' in cursor else 12
             if mode == 'page' and cursor and 'page-' in cursor:
+                if self.pagination_delay:
+                    print(f'History page requested at {time.time():.3f}: {cursor}', flush=True)
+                time.sleep(self.pagination_delay)
                 start = max(0, start - 6)
-            last = start + 6 if mode == 'page' and cursor and 'page-' in cursor else 36
+                if self.pagination_delay:
+                    print(f'History page returned at {time.time():.3f}: page-{start}', flush=True)
+            last = start + 6 if mode == 'page' and cursor and 'page-' in cursor else (24 if self.pagination_delay else 36)
             history = [dict(key=f'page-{i}', role='user', kind='userMessage',
                             text=f'Auto history {i:02d}: ' + 'Earlier message for automatic pagination. ' * 4,
                             order=i - 30, version='v1', truncated=False) for i in range(start, last)]
             initial_reset = mode == 'changes' and not (cursor and 'page-' in cursor)
             return {'epoch': 'synthetic', 'sequence': self.sequence, 'rows': history if mode == 'page' or options.get('after') != self.sequence else [],
                     'reset': initial_reset, 'before': f'synthetic.page-{start}', 'hasMore': start > 0, 'meta': meta}
+        if self.rendering:
+            rendered = []
+            for i in range(80):
+                text = f'Render message {i:02d}: ' + 'Read, scroll and select this unchanged message. ' * 4
+                if i % 2:
+                    text += '\n\n## Markdown\n- **Stable text** and `inline code`\n- [Documentation](https://example.com)\n\n| Item | Result |\n| --- | --- |\n| Rendering | Ready |'
+                rendered.append(dict(key=f'render-{i}', role='assistant' if i % 2 else 'user', kind='agentMessage' if i % 2 else 'userMessage',
+                                     text=text, order=i, version='v1', truncated=False))
+            return {'epoch': 'synthetic', 'sequence': self.sequence, 'rows': rendered if mode == 'page' or options.get('after') != self.sequence else [],
+                    'reset': mode == 'changes' and options.get('after') != self.sequence, 'before': 'synthetic.render-0', 'hasMore': False, 'meta': meta}
         return {'epoch': 'synthetic', 'sequence': self.sequence, 'rows': rows if mode == 'page' or options.get('after') != self.sequence else [], 'before': 'synthetic.u1', 'hasMore': False, 'meta': meta, 'files': ARTIFACT_ROWS}
     def send(self, thread, text, identifier, mode="send", *_, **__):
         self.last_send_mode = mode
-        if text == 'Synthetic pagination regression':
+        if text == 'Synthetic finished steer race' and mode == 'steer':
+            self.rejected_steers += 1
+            raise ValueError('当前任务已经结束，请使用普通发送')
+        if text.startswith('Synthetic long user message'):
+            self.user_message = text
+        if text in ('Synthetic pagination regression', 'Synthetic pagination anchor regression'):
             self.pagination = True
+            self.rendering = False
+            self.pagination_delay = 5 if text == 'Synthetic pagination anchor regression' else 0
             self.scroll_started = None
         if text == 'Synthetic scroll regression':
             self.pagination = False
+            self.rendering = False
             self.scroll_started = time.monotonic()
             self.scroll_stage = 0
+        if text == 'Synthetic rendering regression':
+            self.pagination = False
+            self.scroll_started = None
+            self.rendering = True
         self.attempts[identifier] = self.attempts.get(identifier, 0) + 1
         self.submissions.setdefault(identifier, text)
-        if text == 'Synthetic retry' and self.attempts[identifier] == 1: return {'status': 'unknown', 'confirmed': False}
+        if text in ('Synthetic retry', 'Synthetic pending steer') and self.attempts[identifier] == 1: return {'status': 'unknown', 'confirmed': False}
         self.sequence += 1
         return {'status': 'accepted', 'confirmed': True}
     def interrupt(self, key): self.sequence += 1; return {'ok': True}
     def respond(self, key, request, response): self.responses.append((key, request, response)); return {'ok': True}
     def catalog(self, key, refresh=False):
-        return {'models': [{'id': 'gpt-5.4', 'name': 'GPT-5.4', 'efforts': ['low', 'medium', 'high'], 'defaultEffort': 'medium'}, {'id': 'synthetic-restricted', 'name': 'Synthetic Restricted', 'efforts': ['minimal', 'high'], 'defaultEffort': 'high'}], 'skills': [], 'sendCount': len(self.submissions), 'lastAttemptCount': list(self.attempts.values())[-1] if self.attempts else 0, 'lastSendMode': self.last_send_mode}
+        return {'models': [{'id': 'gpt-5.4', 'name': 'GPT-5.4', 'efforts': ['low', 'medium', 'high'], 'defaultEffort': 'medium'}, {'id': 'synthetic-restricted', 'name': 'Synthetic Restricted', 'efforts': ['minimal', 'high'], 'defaultEffort': 'high'}], 'skills': [], 'sendCount': len(self.submissions), 'lastAttemptCount': list(self.attempts.values())[-1] if self.attempts else 0, 'lastSendMode': self.last_send_mode, 'rejectedSteers': self.rejected_steers, 'lastCreation': self.last_creation}
     def upload(self, key, identifier, name, data): return self.uploads.put(key, identifier, name, data)
     def settings(self, key, model, effort, **kwargs):
         self.model, self.effort = model, effort
@@ -182,9 +218,10 @@ class NativeFixture(SpyBridge):
         with sqlite3.connect(DB) as conn: conn.execute('UPDATE threads SET title=? WHERE id=?', (title, key))
         for server in servers: server.reading.catalog.expires = 0
         return {'ok': True}
-    def create_chat(self, project_key, title, request):
+    def create_chat(self, project_key, title, request, settings=None):
         key = str(uuid.uuid5(uuid.NAMESPACE_URL, request))
-        folder = self.hosts.workspace.project(project_key)['cwd']
+        folder = self.hosts.workspace.project(project_key)['cwd'] if project_key else str(project)
+        self.last_creation = {'project': project_key, 'title': title, 'settings': settings or {}}
         with sqlite3.connect(DB) as conn:
             conn.execute('INSERT OR IGNORE INTO threads(id,title,cwd,originator,source,updated_at,archived) VALUES (?,?,?,?,?,?,?)', (key,title,folder,'Codex Desktop','vscode',1900000000,0))
         for server in servers: server.reading.catalog.expires = 0
