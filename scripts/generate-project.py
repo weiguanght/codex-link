@@ -34,6 +34,8 @@ def main():
     packages = ['Runestone'] + ['TreeSitter' + language + 'Runestone' for language in
         ('Bash', 'C', 'CSS', 'HTML', 'JavaScript', 'JSON', 'Python', 'Rust', 'Swift', 'TOML', 'TypeScript', 'TSX', 'YAML', 'Markdown', 'MarkdownInline')]
     obj('editorpackage', 'isa = XCLocalSwiftPackageReference; relativePath = Packages/Runestone;')
+    obj('mathpackage', 'isa = XCLocalSwiftPackageReference; relativePath = Packages/SwiftMath;')
+    packages.append('SwiftMath')
     for product in packages:
         obj('packageproduct:' + product, f'isa = XCSwiftPackageProductDependency; productName = {product};')
         obj('packagebuild:' + product, f'isa = PBXBuildFile; productRef = {identifier("packageproduct:" + product)};')
@@ -82,7 +84,7 @@ def main():
         buildConfigurationList = {identifier('projectconfigs')}; compatibilityVersion = "Xcode 14.0";
         developmentRegion = zh_CN; hasScannedForEncodings = 0; knownRegions = (zh_CN,en,Base,);
         mainGroup = {identifier('main')}; productRefGroup = {identifier('products')};
-        projectDirPath = ""; projectRoot = ""; packageReferences = ({identifier('editorpackage')},); targets = ({identifier('target')},{identifier('uitesttarget')},);''')
+        projectDirPath = ""; projectRoot = ""; packageReferences = ({identifier('editorpackage')},{identifier('mathpackage')},); targets = ({identifier('target')},{identifier('uitesttarget')},);''')
     project = ROOT / 'ios/codex-link.xcodeproj'
     project.mkdir(exist_ok=True)
     (project / 'project.pbxproj').write_text('// !$*UTF8*$!\n{ archiveVersion = 1; classes = {}; objectVersion = 56; objects = {\n' + '\n'.join(objects) + f'\n}}; rootObject = {identifier("project")}; }}\n')

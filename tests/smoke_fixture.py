@@ -120,7 +120,7 @@ class NativeFixture(SpyBridge):
             self.rendering = False
         rows = [dict(key='u1', role='user', kind='userMessage', text=self.user_message, order=0, version=str(len(self.user_message)), truncated=False, editable=True),
                 dict(key='t1', role='activity', kind='commandExecution', title='检查项目结构', text='rg --files ios/CodexLink', inputLength=len('rg --files ios/CodexLink'), status='completed', exitCode=0, durationMs=125, order=1, version='v1', truncated=True),
-                dict(key='a1', role='assistant', kind='agentMessage', text='已经梳理了项目、会话与输入区的交互。\n\n## 本次调整\n- 项目和任务分组\n- 原生消息流与执行状态\n- 输入区和审批操作\n\n```swift\nlet client = NativeAPI()\n```\n\n```diff\n--- a/example.swift\n+++ b/example.swift\n@@ -1 +1 @@\n-oldValue\n+newValueWithAnIntentionallyLongLineForNativeDiffWrappingInTheIOSConversation\n```', order=2, version='v1', truncated=False, forkable=True)]
+                dict(key='a1', role='assistant', kind='agentMessage', text='已经梳理了项目、会话与输入区的交互。\n\n## 本次调整\n- 公式：$x^2$\n- 原生消息流与执行状态\n- 输入区和审批操作\n\n```swift\nlet client = NativeAPI()\n```\n\n```diff\n--- a/example.swift\n+++ b/example.swift\n@@ -1 +1 @@\n-oldValue\n+newValueWithAnIntentionallyLongLineForNativeDiffWrappingInTheIOSConversation\n```', order=2, version='v1', truncated=False, forkable=True)]
         rows[2]['text'] += f'\n\n[新版 IPA](<{artifact_path}>)'
         rows[2]['text'] += '\n\n| 文件 | 状态 |\n| :--- | ---: |\n| **Native table** | rendered |\n'
         rows[2]['text'] += f'\n[文本预览](<{preview_text}>) · [图片预览](<{preview_image}>)'

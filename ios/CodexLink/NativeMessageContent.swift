@@ -160,6 +160,9 @@ struct NativeMarkdownBlock: Identifiable {
                 }
                 blocks.append(NativeMarkdownBlock(id: blocks.count, content: content.joined(separator: "\n"), code: true, language: language))
                 index += 1
+            } else if let end = displayMathEnd(lines, at: index) {
+                prose.append(contentsOf: lines[index...end])
+                index = end + 1
             } else if let parsed = NativeMarkdownTable.parse(lines, at: index) {
                 appendProse()
                 blocks.append(NativeMarkdownBlock(id: blocks.count, content: "", table: parsed.table))
@@ -167,6 +170,24 @@ struct NativeMarkdownBlock: Identifiable {
             } else { prose.append(lines[index]); index += 1 }
         }
         appendProse(); return blocks
+    }
+
+    private static func displayMathEnd(_ lines: [String], at start: Int) -> Int? {
+        let first = lines[start].trimmingCharacters(in: .whitespaces)
+        let delimiter: String
+        if first.hasPrefix("$$") { delimiter = "$$" }
+        else if first.hasPrefix("\\[") { delimiter = "\\]" }
+        else { return nil }
+        let remainder = first.dropFirst(2)
+        if remainder.hasSuffix(delimiter) { return start }
+        var length = remainder.utf16.count
+        for index in (start + 1)..<lines.count {
+            let line = lines[index].trimmingCharacters(in: .whitespaces)
+            length += line.utf16.count + 1
+            if length > 4_096 { return nil }
+            if line.hasSuffix(delimiter) { return index }
+        }
+        return nil
     }
 }
 
@@ -200,11 +221,17 @@ struct NativeMarkdownTableView: View {
         HStack(alignment: .top, spacing: 0) {
             ForEach(table.headers.indices, id: \.self) { column in
                 let alignment: Alignment = table.alignments[column] == .trailing ? .trailing : table.alignments[column] == .center ? .center : .leading
-                Text(NativeMessageLinks.attributed(cells[column]))
-                    .fontWeight(header ? .semibold : .regular)
-                    .multilineTextAlignment(table.alignments[column] == .trailing ? .trailing : table.alignments[column] == .center ? .center : .leading)
-                    .frame(width: columns[column] - 24, alignment: alignment)
-                    .padding(12).fixedSize(horizontal: false, vertical: true)
+                Group {
+                    if NativeMarkdownMath.mayContainMath(cells[column]) {
+                        NativeSelectableText(text: cells[column], cell: true, bold: header, alignment: table.alignments[column])
+                    } else {
+                        Text(NativeMessageLinks.attributed(cells[column]))
+                            .fontWeight(header ? .semibold : .regular)
+                            .multilineTextAlignment(table.alignments[column] == .trailing ? .trailing : table.alignments[column] == .center ? .center : .leading)
+                    }
+                }
+                .frame(width: columns[column] - 24, alignment: alignment)
+                .padding(12).fixedSize(horizontal: false, vertical: true)
             }
         }
     }

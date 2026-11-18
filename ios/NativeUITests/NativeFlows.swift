@@ -755,6 +755,12 @@ final class NativeFlows: XCTestCase {
         XCTAssertTrue(table.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.staticTexts["Native table"].exists)
         capture("Native rendered Markdown table")
+        let renderedMath = app.textViews.matching(identifier: "native.message.selectable")
+            .matching(NSPredicate(format: "label CONTAINS %@", "公式：$x^2$")).firstMatch
+        for _ in 0..<5 { if renderedMath.isHittable { break }; transcript.swipeUp() }
+        XCTAssertTrue(renderedMath.waitForExistence(timeout: 5))
+        XCTAssertTrue(renderedMath.label.contains("$x^2$"))
+        capture("Native selectable Markdown prose and locally typeset math")
         let disclosure = app.descendants(matching: .any).matching(identifier: "native.chat.files").firstMatch
         for _ in 0..<8 { if disclosure.isHittable { break }; transcript.swipeUp() }
         XCTAssertTrue(disclosure.isHittable); disclosure.tap()
@@ -781,7 +787,7 @@ final class NativeFlows: XCTestCase {
         XCTAssertTrue(done.waitForExistence(timeout: 5)); done.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let markdown = app.buttons["native.chat.file.longest-conversation-document.md"]
         XCTAssertTrue(markdown.waitForExistence(timeout: 5))
-        for _ in 0..<4 {
+        for _ in 0..<8 {
             if markdown.isHittable && markdown.frame.maxY < app.buttons["native.attachment.menu"].frame.minY - 12 { break }
             transcript.swipeUp()
         }
@@ -790,7 +796,7 @@ final class NativeFlows: XCTestCase {
         XCTAssertTrue(app.scrollViews["native.markdown.table"].firstMatch.exists)
         app.navigationBars.buttons["完成"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let image = app.buttons["native.chat.file.image.png"]
-        for _ in 0..<4 { if image.isHittable { break }; transcript.swipeUp() }
+        for _ in 0..<8 { if image.isHittable { break }; transcript.swipeUp() }
         image.tap()
         XCTAssertTrue(app.descendants(matching: .any)["native.file.preview.image"].waitForExistence(timeout: 10))
         app.buttons["native.file.preview.menu"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()

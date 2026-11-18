@@ -175,12 +175,40 @@ final class NativeSmoke: ObservableObject {
         withExtendedLifetime((transcriptWatch, composerWatch)) {}
         let context = NativeContextUsage(json(["usedTokens": .number(24000), "windowTokens": .number(128000)]))
         try require(context?.placeholder == "24K / 128K（18.8%）", "Context placeholder counts or percentage are wrong")
+        let source = #"""
+            Start $x^2$.
+            Next \(\alpha + \beta\).
+
+            \[
+              \begin{matrix} a & b \\ c & d \end{matrix}
+            \]
+            End $$\frac{a}{b}$$ stays literal in the middle of a line.
+            """#
+        let drafts = NativeMarkdownBlock.parse(source)
+        try require(drafts.count == 1 && drafts.first?.content == source, "Display math split the text selection block")
+        let styled = NativeMarkdownText.styled(source, traits: UITraitCollection(userInterfaceStyle: .light))
+        var formulas = 0
+        styled.enumerateAttribute(.attachment, in: NSRange(location: 0, length: styled.length)) { value, _, _ in
+            if let attachment = value as? NSTextAttachment, attachment.image != nil { formulas += 1 }
+        }
+        try require(formulas == 3, "Inline or display formula was not typeset")
+        let blockFormula = NativeMarkdownText.styled(#"$$\sum_{n=1}^{\infty} \frac{1}{n^2}$$"#, traits: UITraitCollection(userInterfaceStyle: .dark))
+        try require(blockFormula.attribute(.attachment, at: 0, effectiveRange: nil) is NSTextAttachment, "Dollar-delimited display math was not typeset")
+        let literal = NativeMarkdownMath.protect(#"`$x$` · \$7 · $7 and $9 · [file](/p-$literal$.txt)"#)
+        try require(literal.formulas.isEmpty, "Code, currency, escaped math, or a link destination became a formula: " + literal.formulas.values.map(\.source).joined(separator: " | "))
+        let fallback = NativeMarkdownText.styled(#"Before $\madeup{x}$ after"#, traits: UITraitCollection())
+        try require(fallback.string == #"Before $\madeup{x}$ after"#, "Unsupported formula lost its source")
         let selectableMessage = SelectableMessageTextView()
-        selectableMessage.text = "select only to copy"
+        selectableMessage.attributedText = styled
+        let range = (styled.string as NSString).range(of: "Start \u{FFFC}.\nNext \u{FFFC}.")
+        try require(range.location != NSNotFound, "Multiple lines are not in the same text storage")
+        selectableMessage.selectedRange = range
         try require(!selectableMessage.isEditable, "Message text must not be editable")
         try require(selectableMessage.isSelectable, "Message text must support native selection")
         try require(selectableMessage.canPerformAction(#selector(UIResponder.copy(_:)), withSender: nil), "Message text must allow copying")
         try require(!selectableMessage.canPerformAction(#selector(UIResponder.paste(_:)), withSender: nil), "Message text must reject pasting")
+        selectableMessage.copy(nil)
+        try require(UIPasteboard.general.string == "Start $x^2$.\nNext \\(\\alpha + \\beta\\).", "Copy must preserve multiple lines and the original TeX")
         try require(NativeSendMode.resolve("steer", running: false) == "send", "Steer should use ordinary send after the task ends")
         try require(NativeSendMode.resolve("steer", running: true) == "steer", "Steer should remain available during an active task")
         try require(NativeSendMode.isFinishedTaskError("当前任务已经结束，请使用普通发送"), "Finished-task response was not recognized for fallback")
