@@ -29,8 +29,10 @@
       sandbox_mode: ['执行沙盒', 'Execution sandbox'], allow_login_shell: ['允许使用登录 Shell', 'Allow login shell'],
     }],
     ['指令与记忆', 'Instructions & memory', {
-      developer_instructions: ['开发者指令', 'Developer instructions'], compact_prompt: ['上下文压缩指令', 'Compaction prompt'],
+      developer_instructions: ['开发者指令', 'Developer instructions'], instructions: ['系统指令', 'System instructions'], compact_prompt: ['上下文压缩指令', 'Compaction prompt'],
       project_doc_max_bytes: ['项目指令读取上限（字节）', 'Project instructions limit (bytes)'],
+      project_doc_fallback_filenames: ['候补指令文件名', 'Fallback instruction filenames'],
+      include_permissions_instructions: ['注入权限说明', 'Include permission instructions'],
       include_environment_context: ['注入工作环境', 'Include working environment'],
       include_environment_context_time: ['注入当前日期与时区', 'Include date and time zone'],
       include_apps_instructions: ['注入应用指令', 'Include app instructions'],
@@ -38,6 +40,23 @@
       'features.memories': ['启用记忆', 'Enable memory'], 'memories.generate_memories': ['生成记忆', 'Generate memories'],
       'memories.use_memories': ['使用记忆', 'Use memories'],
       'memories.disable_on_external_context': ['使用外部上下文时停用记忆', 'Disable memory with external context'],
+      'memories.extract_model': ['提取模型', 'Extraction model'],
+      'memories.consolidation_model': ['整理模型', 'Consolidation model'],
+      'memories.max_raw_memories_for_consolidation': ['整理时读取的记忆上限', 'Max memories read per consolidation'],
+      'memories.max_rollout_age_days': ['参与整理的会话时效（天）', 'Max age of sessions to consolidate (days)'],
+      'memories.max_unused_days': ['未使用记忆保留时长（天）', 'Unused memory retention (days)'],
+      'memories.max_rollouts_per_startup': ['每次启动处理的会话上限', 'Max sessions processed per startup'],
+      'memories.min_rollout_idle_hours': ['会话整理前最短空闲时间（小时）', 'Min idle time before consolidation (hours)'],
+      'memories.min_rate_limit_remaining_percent': ['整理所需最低剩余额度（%）', 'Min remaining quota for consolidation (%)'],
+    }],
+    ['代理与目标', 'Agents & goals', {
+      'agents.enabled': ['启用子代理', 'Enable subagents'],
+      'agents.default_subagent_model': ['子代理默认模型', 'Default subagent model'],
+      'agents.default_subagent_reasoning_effort': ['子代理默认推理强度', 'Default subagent reasoning effort'],
+      'agents.max_concurrent_threads_per_session': ['单会话并发上限', 'Subagent concurrency per session'],
+      'agents.max_depth': ['最大嵌套层数（V1）', 'Max nesting depth (V1)'],
+      'agents.interrupt_message': ['记录子代理回合中断提示', 'Record interruptions of subagent turns'],
+      'goals.max_goal_token_budget': ['目标预算上限（Token）', 'Max goal budget (tokens)'],
     }],
     ['工具与终端', 'Tools & terminal', {
       web_search: ['联网搜索', 'Web search'], tool_output_token_limit: ['工具输出上限（Token）', 'Tool output limit (tokens)'],
@@ -46,9 +65,33 @@
     ['CLI 输入历史', 'CLI input history', {
       'history.persistence': ['保存方式', 'Persistence'], 'history.max_bytes': ['历史文件上限（字节）', 'Max history size (bytes)'],
     }],
+    ['项目与运行时', 'Projects & runtime', {
+      project_root_markers: ['项目根目录标记', 'Project root markers'],
+      check_for_update_on_startup: ['启动时检查更新', 'Check for updates at startup'],
+      thread_unload_delay_secs: ['空闲会话卸载延迟（秒）', 'Idle thread unload delay (seconds)'],
+      'analytics.enabled': ['分析遥测', 'Analytics'], 'feedback.enabled': ['允许提交反馈', 'Allow feedback'],
+    }],
+    ['Codex CLI 界面', 'Codex CLI interface', {
+      'tui.animations': ['动画', 'Animations'], 'tui.show_tooltips': ['显示操作提示', 'Show tooltips'],
+      'tui.collapse_turn_details': ['折叠回合详情', 'Collapse turn details'],
+      'tui.sidebar_width_percent': ['侧栏宽度（%）', 'Sidebar width (%)'],
+      file_opener: ['文件链接打开方式', 'File link opener'], hide_agent_reasoning: ['隐藏推理摘要', 'Hide reasoning summaries'],
+      show_raw_agent_reasoning: ['显示原始推理', 'Show raw reasoning'],
+    }],
   ];
   const labels = Object.assign({}, ...sections.map(([, , fields]) => fields));
   const fieldValue = field => field.effective ?? field.value;
+  const inputValue = field => {
+    const value = fieldValue(field);
+    return Array.isArray(value) ? JSON.stringify(value) : String(value ?? '');
+  };
+  function stringList(value) {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed) && parsed.every(item => typeof item === 'string')) return parsed;
+    } catch {}
+    return undefined;
+  }
   const optionLabels = {
     true: ['开启', 'On'], false: ['关闭', 'Off'], none: ['无', 'None'], 'save-all': ['全部保存', 'Save all'],
     default: ['标准', 'Standard'], fast: ['快速', 'Fast'], priority: ['快速', 'Fast'], flex: ['灵活', 'Flex'],
@@ -89,7 +132,7 @@
     scopeLabel.append(scope); d.append(scopeLabel);
     const tabs = node('nav', 'settings-tabs'); tabs.setAttribute('aria-label', words('设置分类', 'Settings sections'));
     const panels = {};
-    for (const [key, label] of [['config', words('默认行为', 'Defaults')], ['skills', 'Skills'], ['mcp', 'MCP'], ['connections', words('账号与会话', 'Accounts & chat')]]) {
+    for (const [key, label] of [['config', words('默认行为', 'Defaults')], ['skills', 'Skills'], ['mcp', 'MCP'], ['reference', words('全部配置项', 'Configuration index')], ['connections', words('账号与会话', 'Accounts & chat')]]) {
       tabs.append(button(label, () => showTab(key)));
       panels[key] = node('section', 'settings-panel'); panels[key].dataset.panel = key; panels[key].hidden = key !== tab;
     }
@@ -106,10 +149,11 @@
       if (!data || data.scope.key) return result;
       for (const [key, control] of controls) {
         const field = data.fields[key];
-        if (!field.editable || control.value === String(fieldValue(field) ?? '')) continue;
+        if (!field.editable || control.value === inputValue(field)) continue;
         let value = control.value === '' ? null : control.value;
         if (value !== null && field.kind === 'boolean') value = value === 'true';
         if (value !== null && field.kind === 'integer') value = control.valueAsNumber;
+        if (value !== null && field.kind === 'string-list') value = stringList(value) ?? value;
         result[key] = value;
       }
       return result;
@@ -152,10 +196,16 @@
             const value = fieldValue(field);
             if (value !== null && !choices.includes(String(value))) input.append(new Option(String(value), String(value)));
           } else {
-            input = node(field.kind === 'multiline' ? 'textarea' : 'input');
+            input = node(['multiline', 'string-list'].includes(field.kind) ? 'textarea' : 'input');
             input.placeholder = words('默认', 'Default');
             if (field.kind === 'integer') {
               input.type = 'number'; input.step = '1'; input.min = field.minimum; input.max = field.maximum;
+            } else if (field.kind === 'string-list') {
+              input.rows = 2;
+              input.placeholder = '[".git", "Package.swift"]';
+              input.addEventListener('input', () => input.setCustomValidity(
+                !input.value || stringList(input.value) ? '' : words('请输入字符串数组', 'Enter an array of strings')
+              ));
             } else if (field.kind === 'multiline') {
               input.rows = 4; input.maxLength = 32768;
             } else {
@@ -165,7 +215,7 @@
               if (key.endsWith('_effort')) input.setAttribute('list', 'codex-settings-efforts');
             }
           }
-          input.id = 'setting-' + key; input.value = fieldValue(field) ?? '';
+          input.id = 'setting-' + key; input.value = inputValue(field);
           input.disabled = !field.editable; input.addEventListener('input', sync); input.addEventListener('change', sync); controls.set(key, input);
           row.append(label, input);
           if (field.reason && field.reason !== data.reason) row.append(node('p', 'settings-note', field.reason));
@@ -199,6 +249,7 @@
     }
     async function reload() {
       if (busy || (tab === 'config' && !await discard())) return;
+      if (tab === 'reference') { await run(loadReference); return; }
       await run(() => tab === 'mcp' ? loadMcp() : tab === 'skills' ? loadSkills() : read(scope.value));
     }
     scope.onchange = async () => {
@@ -224,6 +275,7 @@
       tab = key; Object.entries(panels).forEach(([name, panel]) => panel.hidden = name !== key);
       [...tabs.children].forEach((b, i) => b.setAttribute('aria-pressed', String(Object.keys(panels)[i] === key)));
       save.hidden = key !== 'config'; refresh.hidden = key === 'connections';
+      if (key === 'reference' && !panels.reference.childElementCount) run(loadReference);
     }
     function showSkillIntro() {
       panels.skills.replaceChildren(node('p', 'settings-note', words('列出所选目录可用的 Skills。开关写入全局用户配置，不是仅对这个项目生效。', 'List skills available in this directory. Toggles change user configuration, not only this project.')),
@@ -260,6 +312,48 @@
       }
       if (!result.servers.length) panels.mcp.append(node('p', 'muted', words('未配置 MCP 服务', 'No MCP servers configured')));
       if (result.hasMore) panels.mcp.append(node('p', 'muted', words('仅显示前 1000 项', 'Showing the first 1,000 entries')));
+    }
+    async function loadReference() {
+      const catalog = await api(endpoint + '/reference');
+      const search = node('input', 'settings-reference-search');
+      search.type = 'search'; search.placeholder = words('搜索 TOML 键或设置名称', 'Search by key or setting');
+      search.setAttribute('aria-label', search.placeholder);
+      const list = node('div', 'settings-reference-results');
+      const version = node('p', 'settings-note', words(
+        'Codex ' + catalog.version + ' · ' + catalog.topLevelCount + ' 个一级键',
+        'Codex ' + catalog.version + ' · ' + catalog.topLevelCount + ' top-level keys'
+      ));
+      function renderIndex() {
+        const query = search.value.trim().toLowerCase();
+        const results = catalog.entries.filter(({key}) => query
+          ? key.toLowerCase().includes(query) || (labels[key] || []).some(label => label.toLowerCase().includes(query))
+          : !key.includes('.') && !key.includes('[')
+        );
+        list.replaceChildren();
+        for (const result of results.slice(0, 150)) {
+          const row = node('details', 'settings-card');
+          row.append(node('summary', '', result.key), node('small', '', [...result.types, ...(result.choices || [])].join(' · ')));
+          if (controls.has(result.key)) {
+            row.append(button(words('定位到设置', 'Open setting'), () => {
+              showTab('config'); controls.get(result.key)?.scrollIntoView({block: 'center'});
+            }));
+          }
+          const childPrefix = [result.key + '.', result.key + '['].find(prefix =>
+            catalog.entries.some(entry => entry.key.startsWith(prefix)));
+          if (childPrefix) {
+            row.append(button(words('查看子项', 'Show subkeys'), () => {
+              search.value = childPrefix;
+              renderIndex();
+            }));
+          }
+          list.append(row);
+        }
+        if (!results.length) list.append(node('p', 'settings-note', words('没有匹配的配置项。', 'No matching settings.')));
+        if (results.length > 150) list.append(node('p', 'settings-note', words('缩小搜索范围以显示其余结果。', 'Refine the search to display more results.')));
+      }
+      search.addEventListener('input', renderIndex);
+      panels.reference.replaceChildren(version, search, list);
+      renderIndex();
     }
     panels.connections.append(node('p', 'settings-note', words('账号沿用原有管理入口；当前会话的模型仍由桌面连接管理，不通过设置查询进程接管。', 'Use the existing account manager. Current-thread models are managed by the desktop connection, never by this settings process.')));
     panels.connections.append(button(words('账号与接入', 'Accounts and providers'), async () => { if (busy || !await discard()) return; d.close(); get('accounts-button').click(); }));

@@ -23,7 +23,8 @@ FIELDS = {
     'model_auto_compact_token_limit_scope': 'choice', 'model_post_turn_compact_threshold_percent': 'integer',
     'approval_policy': 'choice', 'approvals_reviewer': 'choice', 'sandbox_mode': 'choice',
     'allow_login_shell': 'boolean',
-    'developer_instructions': 'multiline', 'compact_prompt': 'multiline',
+    'developer_instructions': 'multiline', 'instructions': 'multiline', 'compact_prompt': 'multiline',
+    'include_permissions_instructions': 'boolean',
     'project_doc_max_bytes': 'integer', 'include_environment_context': 'boolean',
     'include_environment_context_time': 'boolean', 'include_apps_instructions': 'boolean',
     'include_collaboration_mode_instructions': 'boolean',
@@ -31,6 +32,19 @@ FIELDS = {
     'memories.use_memories': 'boolean', 'memories.disable_on_external_context': 'boolean',
     'web_search': 'choice', 'tool_output_token_limit': 'integer', 'background_terminal_max_timeout': 'integer',
     'history.persistence': 'choice', 'history.max_bytes': 'integer',
+    'project_doc_fallback_filenames': 'string-list', 'project_root_markers': 'string-list',
+    'agents.enabled': 'boolean', 'agents.max_concurrent_threads_per_session': 'integer',
+    'agents.max_depth': 'integer', 'agents.default_subagent_model': 'text',
+    'agents.default_subagent_reasoning_effort': 'text', 'agents.interrupt_message': 'boolean',
+    'goals.max_goal_token_budget': 'integer',
+    'memories.extract_model': 'text', 'memories.consolidation_model': 'text',
+    'memories.max_raw_memories_for_consolidation': 'integer', 'memories.max_rollout_age_days': 'integer',
+    'memories.max_unused_days': 'integer', 'memories.max_rollouts_per_startup': 'integer',
+    'memories.min_rate_limit_remaining_percent': 'integer', 'memories.min_rollout_idle_hours': 'integer',
+    'file_opener': 'choice', 'hide_agent_reasoning': 'boolean', 'show_raw_agent_reasoning': 'boolean',
+    'tui.animations': 'boolean', 'tui.show_tooltips': 'boolean', 'tui.collapse_turn_details': 'boolean',
+    'tui.sidebar_width_percent': 'integer', 'check_for_update_on_startup': 'boolean',
+    'thread_unload_delay_secs': 'integer', 'analytics.enabled': 'boolean', 'feedback.enabled': 'boolean',
 }
 PERMISSIONS = {'approval_policy', 'approvals_reviewer', 'sandbox_mode', 'allow_login_shell'}
 LEGACY_PERMISSIONS = {'approval_policy', 'sandbox_mode'}
@@ -40,12 +54,22 @@ REQUIREMENTS = {'approval_policy': 'allowedApprovalPolicies', 'approvals_reviewe
 # enable these options when config/read actually advertises their parent key.
 TOML_CHOICES = {'personality': ['none', 'friendly', 'pragmatic'],
                 'service_tier': ['default', 'fast', 'flex'],
-                'history.persistence': ['save-all', 'none']}
-MODEL_IDS = {'model', 'review_model'}
-EFFORT_IDS = {'model_reasoning_effort', 'plan_mode_reasoning_effort'}
+                'history.persistence': ['save-all', 'none'],
+                'file_opener': ['vscode', 'vscode-insiders', 'windsurf', 'cursor', 'none']}
+MODEL_IDS = {'model', 'review_model', 'agents.default_subagent_model', 'memories.extract_model', 'memories.consolidation_model'}
+EFFORT_IDS = {'model_reasoning_effort', 'plan_mode_reasoning_effort', 'agents.default_subagent_reasoning_effort'}
 INTEGER_BOUNDS = {'model_context_window': (1, 2**53 - 1),
                   'model_auto_compact_token_limit': (1, 2**53 - 1),
-                  'model_post_turn_compact_threshold_percent': (0, 100)}
+                  'model_post_turn_compact_threshold_percent': (0, 100),
+                  'agents.max_concurrent_threads_per_session': (1, 2**53 - 1),
+                  'agents.max_depth': (0, 2**31 - 1), 'goals.max_goal_token_budget': (1, 2**53 - 1),
+                  'memories.max_raw_memories_for_consolidation': (1, 4096),
+                  'memories.max_rollouts_per_startup': (1, 128), 'memories.min_rate_limit_remaining_percent': (0, 100),
+                  'tui.sidebar_width_percent': (1, 99)}
+TOML_KEY_ALIASES = {
+    'agents.max_concurrent_threads_per_session': 'agents.max_threads',
+    'memories.disable_on_external_context': 'memories.no_memories_if_mcp_or_web_search',
+}
 MAX_CONFIG_BYTES = 1024 * 1024
 
 
@@ -57,7 +81,16 @@ def config_value(config, key):
     return config
 
 
+def stored_key(config, key):
+    alias = TOML_KEY_ALIASES.get(key)
+    if alias and config_value(config, key) is None and config_value(config, alias) is not None:
+        return alias
+    return key
+
+
 def typed_value(kind, value):
+    if kind == 'string-list':
+        return isinstance(value, list) and all(isinstance(item, str) for item in value)
     expected = {'integer': int, 'boolean': bool}.get(kind, str)
     return type(value) is expected
 
@@ -182,8 +215,8 @@ class CodexSettings:
                 field_reason = '登录 Shell 由管理员管理。'
             elif key in LEGACY_PERMISSIONS and (config.get('permissions') is not None or config.get('default_permissions') is not None):
                 field_reason = '已配置命名权限方案，避免与旧式沙盒设置冲突；请在 Mac 管理。'
-            effective = config_value(config, key)
-            value = config_value(local, key)
+            effective = config_value(config, stored_key(config, key))
+            value = config_value(local, stored_key(local, key))
             limit = 32768 if kind == 'multiline' else 200
             oversized = any(isinstance(v, str) and len(v) > limit for v in (effective, value))
             if any(v is not None and not typed_value(kind, v) for v in (effective, value)):
@@ -192,7 +225,7 @@ class CodexSettings:
                 field_reason = '此配置值过长，显示已截断；请在 Mac 管理。'
             fields[key] = {'kind': kind, 'value': value if typed_value(kind, value) else None,
                 'effective': effective if typed_value(kind, effective) else None,
-                'structured': isinstance(effective, (dict, list)), 'choices': choices,
+                'structured': isinstance(effective, (dict, list)) and kind != 'string-list', 'choices': choices,
                 'supported': supported, 'confirm': key in PERMISSIONS,
                 'origin': origin(raw.get('origins', {}).get(key)), 'editable': not field_reason, 'reason': field_reason}
             if kind == 'integer':
@@ -235,7 +268,8 @@ class CodexSettings:
                 raise SettingsError('配置已被其他设备或 Mac 修改，请重新读取并合并更改；本次未写入。', 'conflict')
             if not before['writable']:
                 raise SettingsError(before['reason'], 'read_only', 403)
-            edits = []
+            edits = {}
+            local = user.get('config', {})
             for name, value in changes.items():
                 field = before['fields'][name]
                 if not field['editable']:
@@ -247,6 +281,10 @@ class CodexSettings:
                         raise ValueError('选项不受运行时支持或被管理员限制')
                     if field['kind'] == 'integer' and not field['minimum'] <= value <= field['maximum']:
                         raise ValueError('数字超出此设置的取值范围')
+                    if field['kind'] == 'string-list' and (
+                        len(value) > 256 or any(not item or len(item) > 1024 or '\x00' in item for item in value)
+                    ):
+                        raise ValueError('列表最多 256 项，每项须为非空字符串且不超过 1024 字符')
                     if name in MODEL_IDS and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_./:@+\-]{0,199}', value):
                         raise ValueError('模型 ID 无效')
                     if name in EFFORT_IDS and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_\-]{0,79}', value):
@@ -257,10 +295,10 @@ class CodexSettings:
                     continue
                 if name in PERMISSIONS and body.get('confirmPermissions') is not True:
                     raise ValueError('请确认执行权限变更')
-                edits.append({'keyPath': name, 'value': value, 'mergeStrategy': 'replace'})
+                edits[name] = {'keyPath': stored_key(local, name), 'value': value, 'mergeStrategy': 'replace'}
             if not edits:
                 return {'status': 'unchanged', 'settings': self.read(key), 'overridden': []}
-            params = {'edits': edits, 'expectedVersion': user['version']}
+            params = {'edits': list(edits.values()), 'expectedVersion': user['version']}
             if 'reloadUserConfig' in schema['files']['ConfigBatchWriteParams']['properties']:
                 params['reloadUserConfig'] = False
             with self.rpc_factory() as rpc:
@@ -272,9 +310,10 @@ class CodexSettings:
             except (SettingsError, OSError):
                 raise SettingsError('写接口已返回，但回读失败；设置可能已保存，请重新读取。', 'unconfirmed') from None
             stored = (layer or {}).get('config', {})
-            if any(config_value(stored, e['keyPath']) != e['value'] for e in edits):
+            if any(config_value(stored, edit['keyPath']) != edit['value'] for edit in edits.values()):
                 raise SettingsError('回读值与提交值不同，可能发生并发修改；请重新读取。', 'unconfirmed')
-            overridden = [e['keyPath'] for e in edits if e['value'] is not None and after['fields'][e['keyPath']]['effective'] != e['value']]
+            overridden = [name for name, edit in edits.items()
+                          if edit['value'] is not None and after['fields'][name]['effective'] != edit['value']]
             self.snapshots.pop(body['revision'], None)
             after['revision'] = self._remember(key, fingerprint)
             catalog = getattr(self.bridge, 'catalog_reader', None)

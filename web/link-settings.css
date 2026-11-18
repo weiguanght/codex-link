@@ -24,6 +24,9 @@
 .settings-card { border-radius: 16px; background: var(--surface); padding: 16px; margin: 12px 0; font-size: 13px; overflow-wrap: anywhere; }
 .settings-card small { display: block; color: var(--muted); font-size: 11px; }
 .settings-card button { margin-top: 12px; min-height: 44px; }
+.settings-reference-search { width: 100%; box-sizing: border-box; min-width: 0; font-size: 16px; }
+.settings-reference-results summary { font-family: ui-monospace, monospace; cursor: pointer; }
+.settings-reference-results small { margin-top: 8px; }
 .settings-confirm { max-width: min(480px, calc(100vw - 32px)); box-sizing: border-box; }
 .settings-confirm h2 { font-size: 18px; }
 .settings-confirm button { min-height: 44px; margin: 4px; }

@@ -52,6 +52,19 @@ def main():
             'memories.use_memories': False, 'memories.disable_on_external_context': True,
             'tool_output_token_limit': 3000, 'background_terminal_max_timeout': 45000,
             'history.persistence': 'none', 'history.max_bytes': 100000,
+            'instructions': 'Synthetic system instructions', 'include_permissions_instructions': False,
+            'project_doc_fallback_filenames': ['GUIDE.md'], 'project_root_markers': ['.git', 'Package.swift'],
+            'agents.enabled': True, 'agents.max_concurrent_threads_per_session': 4, 'agents.max_depth': 2,
+            'agents.default_subagent_model': 'gpt-5', 'agents.default_subagent_reasoning_effort': 'high',
+            'agents.interrupt_message': False, 'goals.max_goal_token_budget': 123456,
+            'memories.max_raw_memories_for_consolidation': 45, 'memories.max_rollout_age_days': 20,
+            'memories.max_unused_days': 14, 'memories.max_rollouts_per_startup': 6,
+            'memories.min_rate_limit_remaining_percent': 25, 'memories.min_rollout_idle_hours': 16,
+            'memories.extract_model': 'gpt-5', 'memories.consolidation_model': 'gpt-5',
+            'file_opener': 'none', 'hide_agent_reasoning': True, 'show_raw_agent_reasoning': False,
+            'tui.animations': False, 'tui.show_tooltips': False, 'tui.collapse_turn_details': True,
+            'tui.sidebar_width_percent': 48, 'check_for_update_on_startup': False,
+            'thread_unload_delay_secs': 300, 'analytics.enabled': False, 'feedback.enabled': False,
         }
         available = {key: item for key, item in samples.items() if before['fields'][key]['supported']}
         if available:
@@ -64,6 +77,14 @@ def main():
                 assert fields['memories.use_memories']['value'] is None
                 assert fields['memories.generate_memories']['value'] is True
             save(dict.fromkeys(available), confirm=True)
+        if 'agents.max_concurrent_threads_per_session' in available:
+            path = home / 'config.toml'
+            existing = path.read_text()
+            path.write_text('[agents]\nmax_threads = 4\n')
+            edited = save({'agents.max_concurrent_threads_per_session': 6})['settings']['fields']
+            assert edited['agents.max_concurrent_threads_per_session']['effective'] == 6
+            assert 'max_threads = 6' in path.read_text()
+            path.write_text(existing)
         revision = service.read()['revision']; save({'model_reasoning_effort': 'low'})
         try: service.write({'revision': revision, 'changes': {'model_reasoning_effort': 'high'}})
         except SettingsError as e: assert e.code == 'conflict'

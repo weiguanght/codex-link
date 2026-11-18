@@ -296,17 +296,23 @@ final class NativeSmoke: ObservableObject {
             do { _ = try await api.value("/api/sessions/\(readOnly.id)/send", body: json(["text": string("DO NOT EXECUTE"), "id": string(UUID().uuidString.lowercased())])) } catch { rejected = true }
             try require(rejected, "Read-only history accepted a write")
             checks.append("typed history + server read-only guard")
+            let configIndex = try await api.value("/api/codex-settings/reference")
+            try require(configIndex["topLevelCount"].int >= 103
+                        && configIndex["entries"].array.contains(where: { $0["key"].string == "mcp_servers.*.command" }),
+                        "Config reference entries failed to load")
             let settings = try await api.value("/api/codex-settings")
+            let projectMarkers: JSONValue = .array([.string(".git"), .string("Package.swift")])
             let saved = try await api.value("/api/codex-settings", body: json([
                 "revision": settings["revision"],
                 "changes": json(["model_reasoning_effort": .string("high"), "model_context_window": .number(128000),
-                                 "memories.use_memories": .bool(false)])
+                                 "memories.use_memories": .bool(false), "project_root_markers": projectMarkers])
             ]))
             try require(["saved", "unchanged"].contains(saved["status"].string), "Native synthetic config save failed")
             let fields = saved["settings"]["fields"]
             try require(fields["model_context_window"]["effective"] == .number(128000)
-                        && fields["memories.use_memories"]["effective"] == .bool(false), "Typed configuration readback failed")
-            checks.append("native settings typed save + readback + CSRF")
+                        && fields["memories.use_memories"]["effective"] == .bool(false)
+                        && fields["project_root_markers"]["effective"] == projectMarkers, "Typed configuration readback failed")
+            checks.append("native config index + typed settings save + readback + CSRF")
             if let desktop = workspace.sessions.first(where: { $0.readOnly != true }) {
                 let draftDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
                 defer { try? FileManager.default.removeItem(at: draftDirectory) }

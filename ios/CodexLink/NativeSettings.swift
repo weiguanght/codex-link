@@ -17,8 +17,10 @@ struct NativeAppSettings: View {
                     category(.models, detail: "默认模型、计划推理与上下文压缩", icon: "cpu", color: .purple)
                     category(.permissions, detail: "命令审批、审核方式与执行沙盒", icon: "shield", color: .orange)
                     category(.instructions, detail: "开发者指令、环境信息与记忆", icon: "doc.text", color: .indigo)
+                    category(.agents, detail: "并行子代理、嵌套层数和目标预算", icon: "person.2", color: .purple)
                     category(.tools, detail: "联网搜索、终端、Skills 与 MCP", icon: "wrench.and.screwdriver", color: .teal)
-                    category(.history, detail: "CLI 输入历史与容量", icon: "clock.arrow.circlepath", color: .blue)
+                    category(.history, detail: "CLI 输入历史、项目识别与运行时", icon: "clock.arrow.circlepath", color: .blue)
+                    category(.cli, detail: "终端界面、输出与文件打开方式", icon: "terminal", color: .teal)
                 }
             }
             Section("连接与高级") {
@@ -31,6 +33,9 @@ struct NativeAppSettings: View {
                     }
                     NavigationLink { NativeAdvancedSettings(api: workspace.api) } label: {
                         entry("高级配置", detail: "直接编辑 config.toml", icon: "curlybraces", color: .gray)
+                    }
+                    NavigationLink { NativeConfigReference(api: workspace.api) } label: {
+                        entry("全部配置项", detail: "搜索 TOML 键、类型和可选值", icon: "list.bullet.rectangle", color: .gray)
                     }
                 }
             }
@@ -137,15 +142,17 @@ private struct NativeMacConnectionSettings: View {
 }
 
 enum CodexSettingsCategory: CaseIterable {
-    case models, permissions, instructions, tools, history
+    case models, permissions, instructions, agents, tools, history, cli
 
     var title: String {
         switch self {
         case .models: return "模型与推理"
         case .permissions: return "权限与沙盒"
         case .instructions: return "指令与记忆"
+        case .agents: return "代理与目标"
         case .tools: return "工具与终端"
         case .history: return "历史与存储"
+        case .cli: return "Codex CLI 界面"
         }
     }
 
@@ -169,13 +176,28 @@ enum CodexSettingsCategory: CaseIterable {
             ]
         case .instructions:
             return [
-                .init("指令", [("developer_instructions", "开发者指令"), ("compact_prompt", "上下文压缩指令"),
-                              ("project_doc_max_bytes", "项目指令读取上限（字节）")]),
+                .init("指令", [("developer_instructions", "开发者指令"), ("instructions", "系统指令"), ("compact_prompt", "上下文压缩指令"),
+                              ("project_doc_max_bytes", "项目指令读取上限（字节）"), ("project_doc_fallback_filenames", "候补指令文件名")]),
                 .init("注入到模型的上下文", [("include_environment_context", "工作环境"), ("include_environment_context_time", "当前日期与时区"),
-                                             ("include_apps_instructions", "应用指令"), ("include_collaboration_mode_instructions", "协作模式指令")]),
+                                             ("include_apps_instructions", "应用指令"), ("include_collaboration_mode_instructions", "协作模式指令"),
+                                             ("include_permissions_instructions", "权限说明")]),
                 .init("记忆", [("features.memories", "启用记忆"), ("memories.generate_memories", "生成记忆"),
                               ("memories.use_memories", "使用记忆"), ("memories.disable_on_external_context", "使用外部上下文时停用记忆")],
-                      note: "开启记忆后，Codex 才会按下方配置生成和使用记忆。")
+                      note: "开启记忆后，Codex 会按配置生成和使用记忆。"),
+                .init("记忆保留与整理", [("memories.extract_model", "提取模型"), ("memories.consolidation_model", "整理模型"),
+                                         ("memories.max_raw_memories_for_consolidation", "整理时读取的记忆上限"),
+                                         ("memories.max_rollout_age_days", "参与整理的会话时效（天）"),
+                                         ("memories.max_unused_days", "未使用记忆保留时长（天）"),
+                                         ("memories.max_rollouts_per_startup", "每次启动处理的会话上限"),
+                                         ("memories.min_rollout_idle_hours", "会话整理前最短空闲时间（小时）"),
+                                         ("memories.min_rate_limit_remaining_percent", "整理所需最低剩余额度（%）")])
+            ]
+        case .agents:
+            return [
+                .init("子代理", [("agents.enabled", "启用子代理"), ("agents.default_subagent_model", "默认模型"),
+                                ("agents.default_subagent_reasoning_effort", "默认推理强度"), ("agents.max_concurrent_threads_per_session", "单会话并发上限"),
+                                ("agents.max_depth", "最大嵌套层数（V1）"), ("agents.interrupt_message", "记录子代理回合中断提示")]),
+                .init("目标", [("goals.max_goal_token_budget", "目标预算上限（Token）")])
             ]
         case .tools:
             return [
@@ -185,7 +207,17 @@ enum CodexSettingsCategory: CaseIterable {
         case .history:
             return [
                 .init("CLI 输入历史", [("history.persistence", "保存方式"), ("history.max_bytes", "历史文件上限（字节）")],
-                      note: "此项控制 CLI 输入记录 history.jsonl。会话和聊天记录另行保存。")
+                      note: "此项控制 CLI 输入记录 history.jsonl。会话和聊天记录另行保存。"),
+                .init("项目与运行时", [("project_root_markers", "项目根目录标记"), ("thread_unload_delay_secs", "空闲会话卸载延迟（秒）"),
+                                      ("check_for_update_on_startup", "启动时检查更新")]),
+                .init("隐私", [("analytics.enabled", "分析遥测"), ("feedback.enabled", "允许提交反馈")])
+            ]
+        case .cli:
+            return [
+                .init("显示与交互", [("tui.animations", "动画"), ("tui.show_tooltips", "显示操作提示"),
+                                     ("tui.collapse_turn_details", "折叠回合详情"), ("tui.sidebar_width_percent", "侧栏宽度（%）")]),
+                .init("输出", [("file_opener", "文件链接打开方式"), ("hide_agent_reasoning", "隐藏推理摘要"),
+                              ("show_raw_agent_reasoning", "显示原始推理")])
             ]
         }
     }
@@ -207,6 +239,7 @@ struct NativeCodexSettings: View {
     let api: NativeAPI
     var initialScope = ""
     var category: CodexSettingsCategory?
+    var focusedKey: String?
 
     @Environment(\.dismiss) private var dismiss
     @State private var value: JSONValue = .null
@@ -221,7 +254,12 @@ struct NativeCodexSettings: View {
     @State private var models: [JSONValue] = []
 
     private var sections: [CodexSettingsSection] {
-        (category.map { [$0] } ?? CodexSettingsCategory.allCases).flatMap(\.sections)
+        let sections = (category.map { [$0] } ?? CodexSettingsCategory.allCases).flatMap(\.sections)
+        guard let focusedKey else { return sections }
+        return sections.compactMap { section in
+            guard let row = section.rows.first(where: { $0.key == focusedKey }) else { return nil }
+            return .init(section.title, [row], note: section.note)
+        }
     }
     private var changes: [String: JSONValue] {
         draft.reduce(into: [:]) { result, entry in
@@ -230,17 +268,28 @@ struct NativeCodexSettings: View {
             switch value["fields"][key]["kind"].string {
             case "boolean": result[key] = text.isEmpty ? .null : .bool(text == "true")
             case "integer": result[key] = text.isEmpty ? .null : Int(text).map { .number(Double($0)) }
+            case "string-list": result[key] = text.isEmpty ? .null : decodeStringList(text).map { .array($0.map(JSONValue.string)) }
             default: result[key] = text.isEmpty ? .null : .string(text)
             }
         }
     }
-    private var invalidNumber: String? {
+    private var validationError: String? {
         sections.lazy.flatMap(\.rows).first { row in
             let field = value["fields"][row.key]
-            guard field["kind"].string == "integer", let text = draft[row.key], !text.isEmpty else { return false }
+            guard let text = draft[row.key], !text.isEmpty else { return false }
+            if field["kind"].string == "string-list" { return decodeStringList(text) == nil }
+            guard field["kind"].string == "integer" else { return false }
             guard let number = Int(text) else { return true }
             return number < field["minimum"].int || number > (field["maximum"] == .null ? 9_007_199_254_740_991 : field["maximum"].int)
-        }?.label
+        }.map { row in
+            value["fields"][row.key]["kind"].string == "string-list"
+                ? "\(row.label)须为字符串数组。"
+                : "\(row.label)超出取值范围。"
+        }
+    }
+
+    private func decodeStringList(_ text: String) -> [String]? {
+        try? JSONDecoder().decode([String].self, from: Data(text.utf8))
     }
 
     var body: some View {
@@ -248,15 +297,18 @@ struct NativeCodexSettings: View {
             if !initialScope.isEmpty {
                 Section { LabeledContent("项目", value: value["scope"]["name"].string) }
             }
-            if !value["reason"].string.isEmpty || !error.isEmpty || !status.isEmpty || invalidNumber != nil {
+            if !value["reason"].string.isEmpty || !error.isEmpty || !status.isEmpty || validationError != nil {
                 Section {
                     NativeNotice(text: value["reason"].string)
                     NativeNotice(text: error, isError: true)
                     NativeNotice(text: status)
-                    if let invalidNumber { NativeNotice(text: "\(invalidNumber)超出取值范围。", isError: true) }
+                    if let validationError { NativeNotice(text: validationError, isError: true) }
                 }
             }
             if value != .null {
+                if let focusedKey, !isVisible(focusedKey) {
+                    Section { Text("当前 Mac 运行时未提供此配置项。").foregroundStyle(.secondary) }
+                }
                 ForEach(sections, id: \.title) { section in
                     let rows = section.rows.filter { isVisible($0.key) }
                     if !rows.isEmpty {
@@ -272,7 +324,7 @@ struct NativeCodexSettings: View {
                         }
                     }
                 }
-                if category == .tools {
+                if category == .tools && focusedKey == nil {
                     Section("扩展") {
                         if value["capabilities"]["skills"].bool {
                             NavigationLink("Skills") { NativeSkillsView(api: api, scope: initialScope) }
@@ -306,7 +358,7 @@ struct NativeCodexSettings: View {
                         if changes.keys.contains(where: needsConfirmation) { permissions = true }
                         else { perform { try await save() } }
                     }
-                    .disabled(busy || stale || changes.isEmpty || invalidNumber != nil || !value["writable"].bool)
+                    .disabled(busy || stale || changes.isEmpty || validationError != nil || !value["writable"].bool)
                     .accessibilityIdentifier("native.settings.save")
                 }
             }
@@ -343,6 +395,7 @@ struct NativeCodexSettings: View {
         switch current {
         case .bool(let flag): return flag ? "true" : "false"
         case .number(let number): return Int(exactly: number).map { String($0) } ?? ""
+        case .array: return current.pretty
         default: return current.string
         }
     }
@@ -368,12 +421,15 @@ struct NativeCodexSettings: View {
                 }
                 .pickerStyle(.menu)
                 .accessibilityIdentifier("native.setting.\(key)")
-            case "multiline":
+            case "multiline", "string-list":
                 Text(label)
                 TextEditor(text: input)
                     .frame(minHeight: 88)
                     .accessibilityLabel(label)
                     .accessibilityIdentifier("native.setting.\(key)")
+                if field["kind"].string == "string-list" {
+                    Text(#"使用字符串数组，例如 ["AGENTS.md", "GUIDE.md"]。"#).font(.caption).foregroundStyle(.secondary)
+                }
             default:
                 LabeledContent {
                     HStack(spacing: 8) {
@@ -473,6 +529,112 @@ struct NativeCodexSettings: View {
             defer { busy = false }
             do { try await action() } catch { self.error = error.localizedDescription }
         }
+    }
+}
+
+private struct CodexConfigReference: Decodable {
+    let version: String
+    let topLevelCount: Int
+    let entries: [Entry]
+
+    struct Entry: Decodable, Identifiable {
+        let key: String
+        let types: [String]
+        let choices: [String]?
+        var id: String { key }
+        var topLevel: Bool { !key.contains(".") && !key.contains("[") }
+    }
+}
+
+private struct NativeConfigReference: View {
+    let api: NativeAPI
+    @State private var catalog: CodexConfigReference?
+    @State private var query = ""
+    @State private var error = ""
+    @State private var busy = false
+
+    private var results: [CodexConfigReference.Entry] {
+        guard let catalog else { return [] }
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if query.isEmpty { return catalog.entries.filter(\.topLevel) }
+        return catalog.entries.filter {
+            $0.key.localizedCaseInsensitiveContains(query)
+                || Self.forms[$0.key]?.label.localizedCaseInsensitiveContains(query) == true
+        }
+    }
+
+    private static let forms = Dictionary(uniqueKeysWithValues: CodexSettingsCategory.allCases.flatMap { category in
+        category.sections.flatMap(\.rows).map { row in (row.key, (category: category, label: row.label)) }
+    })
+
+    var body: some View {
+        List {
+            if let catalog {
+                Section {
+                    ForEach(results) { entry in
+                        NavigationLink { detail(entry, showChildren: entry.topLevel) } label: { row(entry) }
+                    }
+                    if results.isEmpty { Text("没有匹配的配置项。").foregroundStyle(.secondary) }
+                } header: {
+                    Text("Codex \(catalog.version) · \(catalog.topLevelCount) 个一级键")
+                }
+            } else if !error.isEmpty {
+                Section {
+                    NativeNotice(text: error, isError: true)
+                    Button("重新读取") { Task { await load() } }
+                }
+            }
+        }
+        .navigationTitle("全部配置项").navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索 TOML 键或设置名称")
+        .overlay { if busy { ProgressView("读取配置索引…") } }
+        .task { if catalog == nil { await load() } }
+    }
+
+    private func row(_ entry: CodexConfigReference.Entry) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(entry.key).font(.system(.subheadline, design: .monospaced))
+            if let form = Self.forms[entry.key] { Text(form.label).font(.caption).foregroundStyle(.secondary) }
+        }
+    }
+
+    private func detail(_ entry: CodexConfigReference.Entry, showChildren: Bool) -> AnyView {
+        let children = showChildren ? (catalog?.entries ?? []).filter {
+            $0.key.hasPrefix(entry.key + ".") || $0.key.hasPrefix(entry.key + "[")
+        } : []
+        return AnyView(List {
+            Section {
+                Text(entry.key).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                if !entry.types.isEmpty { LabeledContent("类型", value: entry.types.joined(separator: " / ")) }
+                if let choices = entry.choices, !choices.isEmpty {
+                    Text(choices.joined(separator: " · ")).font(.caption.monospaced()).textSelection(.enabled)
+                }
+                if let form = Self.forms[entry.key] {
+                    NavigationLink("编辑\(form.label)") {
+                        NativeCodexSettings(api: api, category: form.category, focusedKey: entry.key)
+                    }
+                } else {
+                    NavigationLink("打开高级配置") { NativeAdvancedSettings(api: api) }
+                }
+            }
+            if !children.isEmpty {
+                Section("子项") {
+                    ForEach(children) { child in
+                        NavigationLink { detail(child, showChildren: false) } label: { row(child) }
+                    }
+                }
+            }
+        }
+        .navigationTitle("配置详情").navigationBarTitleDisplayMode(.inline))
+    }
+
+    private func load() async {
+        guard !busy else { return }
+        busy = true
+        error = ""
+        defer { busy = false }
+        do { catalog = try await api.request("/api/codex-settings/reference") }
+        catch { self.error = error.localizedDescription }
     }
 }
 

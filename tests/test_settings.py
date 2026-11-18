@@ -51,7 +51,7 @@ class FakeRuntime:
         self.calls.append((method, copy.deepcopy(params)))
         if method == 'config/read':
             if self.written and self.fail_readback: raise SettingsError('synthetic failure')
-            effective = {'memories': None, 'features': {'memories': False}, 'history': {'persistence': 'save-all'},
+            effective = {'memories': None, 'features': {'memories': False}, 'history': {'persistence': 'save-all'}, 'tui': None,
                          **self.local, **self.extra, **self.overrides}
             user = {'name': {'type': 'user', 'file': str(self.home / 'config.toml'), 'profile': self.extra.get('profile')}, 'version': digest(self.local), 'config': copy.deepcopy(self.local)}
             layers = [user]
@@ -140,7 +140,9 @@ class SettingsTests(unittest.TestCase):
     def test_typed_settings_validation_and_runtime_support(self):
         for changes in ({'model_context_window': True}, {'model_context_window': 0},
                         {'model_post_turn_compact_threshold_percent': 101}, {'tool_output_token_limit': 1.5},
-                        {'include_environment_context': 'false'}, {'history.persistence': 'disabled'}):
+                        {'include_environment_context': 'false'}, {'history.persistence': 'disabled'},
+                        {'project_root_markers': ['.git', True]}, {'project_root_markers': ['']},
+                        {'tui.sidebar_width_percent': 100}):
             with self.assertRaises(ValueError):
                 self.save(**changes)
         self.rpc.extra['features'] = {}
@@ -154,6 +156,13 @@ class SettingsTests(unittest.TestCase):
             self.service.write({'revision': self.service.read()['revision'], 'changes': {'allow_login_shell': True},
                                 'confirmPermissions': True})
         self.assertNotIn('config/batchWrite', [method for method, _ in self.rpc.calls])
+
+    def test_empty_string_list_and_reset_are_distinct(self):
+        self.rpc.local['project_root_markers'] = ['.git']
+        saved = self.save(project_root_markers=[])
+        self.assertEqual(saved['settings']['fields']['project_root_markers']['value'], [])
+        self.save(project_root_markers=None)
+        self.assertNotIn('project_root_markers', self.rpc.local)
 
     def test_conflict_preserves_external_changes(self):
         token = self.service.read()['revision']; self.rpc.local['external'] = 42
@@ -313,6 +322,23 @@ class SettingsHTTPTests(unittest.TestCase):
         self.assertEqual(saved['status'], 'saved')
         self.assertEqual(Path(saved['path']).read_text(), body['content'])
         self.assertEqual(self.request(path, body, headers)[0], 409)
+
+    def test_config_reference_is_authenticated_and_contains_nested_schema_keys(self):
+        path = '/api/codex-settings/reference'
+        self.assertEqual(self.request(path)[0], 401)
+        headers = self.authenticate()
+        code, catalog, _ = self.request(path, headers=headers)
+        self.assertEqual(code, 200)
+        entries = {row['key']: row for row in catalog['entries']}
+        roots = {key for key in entries if '.' not in key and '[' not in key}
+        self.assertEqual(len(roots), catalog['topLevelCount'])
+        self.assertIn('mcp_servers.*.command', entries)
+        self.assertIn('string', entries['model_providers.*.base_url']['types'])
+        self.assertIn('agents.max_concurrent_threads_per_session', entries)
+        self.assertTrue(set(FIELDS) <= entries.keys())
+        self.assertNotIn('SYNTHETIC_SECRET', json.dumps(catalog))
+        self.assertFalse(self.rpc.calls)
+        self.assertEqual(self.request(path, {}, headers)[0], 404)
 
     def test_no_rpc_passthrough_and_no_secrets_in_http_errors(self):
         headers = self.authenticate()

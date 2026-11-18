@@ -1,4 +1,6 @@
 """Authenticated settings facade, not an arbitrary JSON-RPC proxy."""
+import json
+from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from .settings_rpc import SettingsError
 
@@ -24,6 +26,8 @@ def handle(handler, write, path):
             result = settings.models()
         elif not write and path == '/api/codex-settings/mcp':
             result = settings.mcp()
+        elif not write and path == '/api/codex-settings/reference':
+            result = json.loads(Path(__file__).with_name('config_reference.json').read_text(encoding='utf-8'))
         else:
             handler.close_connection = True
             handler.output(404, {'error': '设置接口不存在'})

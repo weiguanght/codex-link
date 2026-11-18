@@ -13,6 +13,7 @@ fs.mkdirSync(output, {recursive: true});
 const html = execFileSync('python3', ['-c',
   "from mac.web_ui import page; import sys; sys.stdout.buffer.write(page('vendor/codex-mobile-bridge/web'))"], {cwd: root});
 const original = fs.readFileSync(path.join(root, 'vendor/codex-mobile-bridge/web/index.html'), 'utf8');
+const configReference = JSON.parse(fs.readFileSync(path.join(root, 'mac/config_reference.json'), 'utf8'));
 const originalIds = [...original.matchAll(/\bid="([^"]+)"/g)].map(m => m[1]).filter(id => id !== 'appearance-reasoning');
 const titles = ['优化 iPhone 的聊天体验', '梳理会话发现与项目索引', '完善 IPv6 自动连接', '设计极简的阅读页面', '整理 Markdown 渲染样式', '添加跨平台构建说明', '检查消息发送与审批流程'];
 const projects = ['codex-link', 'codex-link', 'codex-link', 'notes-app', 'notes-app', 'workspace', 'workspace'];
@@ -50,7 +51,8 @@ const engine = process.env.UI_BROWSER === 'webkit' ? webkit : chromium;
     const configValues = {model: 'gpt-5.4', model_reasoning_effort: 'high', include_environment_context: true};
     function settingsFixture(scope = '') {
       const choices = {model_reasoning_summary: ['auto', 'concise', 'none'], model_verbosity: ['low', 'medium', 'high'], web_search: ['disabled', 'cached', 'live'], approval_policy: ['untrusted', 'on-request', 'never'], sandbox_mode: ['read-only', 'workspace-write', 'danger-full-access']};
-      const types = {developer_instructions: 'multiline', model_context_window: 'integer', include_environment_context: 'boolean'};
+      const types = {developer_instructions: 'multiline', model_context_window: 'integer',
+        include_environment_context: 'boolean', project_root_markers: 'string-list'};
       const keys = ['model', 'model_reasoning_effort', ...Object.keys(choices), ...Object.keys(types)];
       return {scope: {key: scope, name: scope ? 'codex-link' : 'Global defaults'}, revision: 'config-' + settingsVersion,
         fields: Object.fromEntries(keys.map(key => [key, {kind: choices[key] ? 'choice' : types[key] || 'text', value: configValues[key] ?? null,
@@ -95,6 +97,7 @@ const engine = process.env.UI_BROWSER === 'webkit' ? webkit : chromium;
           return json(settingsFixture(url.searchParams.get('scope') || ''));
         }
         if (p === '/api/codex-settings/models') return json({models: [{id: 'gpt-5.4', name: 'GPT-5.4', efforts: ['low', 'medium', 'high']}], notice: 'Synthetic catalog'});
+        if (p === '/api/codex-settings/reference') return json(configReference);
         if (p === '/api/codex-settings/skills') {
           if (request.method() === 'POST') { skillEnabled = request.postDataJSON().enabled; settingsVersion++; }
           return json(skillFixture());
@@ -637,6 +640,21 @@ const engine = process.env.UI_BROWSER === 'webkit' ? webkit : chromium;
     await page.waitForFunction(() => document.getElementById('codex-settings-status').textContent.includes('回读确认'));
     assert.deepEqual(writes.filter(w => w.path === '/api/codex-settings').at(-1).body.changes,
       {model_context_window: 128000, include_environment_context: false});
+    await page.fill('#setting-project_root_markers', '[".git",7]');
+    assert.equal(await page.isDisabled('#codex-settings-save'), true);
+    await page.fill('#setting-project_root_markers', '[".git","Package.swift"]');
+    await page.click('#codex-settings-save');
+    await page.waitForFunction(() => document.getElementById('codex-settings-status').textContent.includes('回读确认'));
+    assert.deepEqual(writes.filter(w => w.path === '/api/codex-settings').at(-1).body.changes,
+      {project_root_markers: ['.git', 'Package.swift']});
+    await settings.getByRole('button', {name: '全部配置项', exact: true}).click();
+    const configSearch = settings.getByRole('searchbox', {name: '搜索 TOML 键或设置名称'});
+    await configSearch.fill('mcp_servers.*.command');
+    await settings.locator('summary').getByText('mcp_servers.*.command', {exact: true}).click();
+    await settings.getByText('string', {exact: true}).waitFor();
+    await configSearch.fill('项目根目录标记');
+    await settings.locator('summary').getByText('project_root_markers', {exact: true}).click();
+    await settings.getByRole('button', {name: '定位到设置', exact: true}).click();
     await page.click('#codex-settings-load-models');
     await page.waitForSelector('#codex-settings-models option', {state: 'attached'});
     assert.equal(await page.locator('#codex-settings-efforts option').count(), 3);
