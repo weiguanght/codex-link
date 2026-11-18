@@ -1,5 +1,12 @@
 import SwiftUI
 
+struct NativeTurnProcessState: Equatable {
+    let expanded: Bool
+    let loading: Bool
+    let hasMore: Bool
+    let error: String
+}
+
 /// Unchanged messages do not reparse Markdown when composer/layout state changes.
 struct NativeChatRow: View, Equatable {
     let sessionIdentity: String
@@ -9,22 +16,36 @@ struct NativeChatRow: View, Equatable {
     let stats: NativeDiffStats?
     let readOnly: Bool
     let hasMore: Bool
+    let processState: NativeTurnProcessState?
+    let insideProcess: Bool
     let onTool: () -> Void
     let onAttachment: (JSONValue) -> Void
     let onCopy: (String) -> Void
     let onExpand: () -> Void
     let onMessageAction: () -> Void
     let onLoadStats: () async -> Void
+    let onToggleProcess: () -> Void
+    let onLoadProcess: () async -> Void
     static func == (left: Self, right: Self) -> Bool {
         left.sessionIdentity == right.sessionIdentity && left.cursor == right.cursor && left.row == right.row && left.text == right.text &&
-        left.stats == right.stats && left.readOnly == right.readOnly && left.hasMore == right.hasMore
+        left.stats == right.stats && left.readOnly == right.readOnly && left.hasMore == right.hasMore &&
+        left.processState == right.processState && left.insideProcess == right.insideProcess
     }
     var body: some View {
         #if LINK_SMOKE
         let _ = NativeChatRenderMetrics.rowBodies += 1
         #endif
-        if row.isProcess { NativeToolRow(row: row, text: text, stats: stats) { onTool() } }
-        else { message }
+        Group {
+            if let processState { processHeader(processState) }
+            else if row.isProcess { NativeToolRow(row: row, text: text, stats: stats) { onTool() } }
+            else { message }
+        }
+        .padding(.horizontal, insideProcess ? 12 : 0)
+        .padding(.vertical, insideProcess ? 8 : 0)
+        .background(insideProcess ? Color.linkSurface : Color.clear)
+        .overlay(alignment: .leading) {
+            if insideProcess { Rectangle().fill(Color.secondary.opacity(0.2)).frame(width: 2) }
+        }
     }
     private var message: some View {
         VStack(alignment: row.role == "user" ? .trailing : .leading, spacing: 10) {
@@ -50,11 +71,48 @@ struct NativeChatRow: View, Equatable {
                 HStack(spacing: 20) {
                     Button { onCopy(text) } label: { Image(systemName: "doc.on.doc") }.accessibilityLabel("复制回复")
                     ShareLink(item: text) { Image(systemName: "square.and.arrow.up") }.accessibilityLabel("分享回复")
-                    if row.forkable == true && !readOnly { Button { onMessageAction() } label: { Image(systemName: "arrow.triangle.branch") }.accessibilityLabel("从此处分支") }
+                    if row.forkable == true && !readOnly && !insideProcess { Button { onMessageAction() } label: { Image(systemName: "arrow.triangle.branch") }.accessibilityLabel("从此处分支") }
                 }.font(.system(size: 14)).foregroundStyle(.secondary).padding(.top, 2)
             }
         }
         .frame(maxWidth: .infinity, alignment: row.role == "user" ? .trailing : .leading)
+    }
+
+    private func processHeader(_ state: NativeTurnProcessState) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button(action: onToggleProcess) {
+                HStack(spacing: 8) {
+                    if row.turnRunning, let startedAt = row.startedAtMs {
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            Text(Self.elapsed(Int(context.date.timeIntervalSince1970 * 1000) - startedAt))
+                        }
+                    } else { Text(Self.elapsed(row.durationMs)) }
+                    Image(systemName: state.expanded ? "chevron.down" : "chevron.right").font(.caption.weight(.semibold))
+                    Spacer(minLength: 0)
+                }
+                .font(.subheadline).monospacedDigit().foregroundStyle(.secondary)
+                .padding(.vertical, 10).contentShape(Rectangle())
+            }.buttonStyle(.plain)
+                .accessibilityIdentifier("native.turn.process." + (row.turnId ?? row.key))
+                .accessibilityValue(state.expanded ? "展开" : "收起")
+            if state.expanded {
+                if state.loading { ProgressView().controlSize(.small).padding(.bottom, 8) }
+                if !state.error.isEmpty {
+                    Text(state.error).font(.caption).foregroundStyle(.red)
+                    Button("重试加载") { Task { await onLoadProcess() } }.font(.caption)
+                } else if state.hasMore && !state.loading {
+                    Button("加载更多过程") { Task { await onLoadProcess() } }.font(.caption).padding(.bottom, 8)
+                }
+            }
+        }
+        .padding(.horizontal, state.expanded ? 12 : 0)
+        .background(state.expanded ? Color.linkSurface : Color.clear)
+    }
+
+    private static func elapsed(_ milliseconds: Int?) -> String {
+        guard let milliseconds else { return "用时未知" }
+        let seconds = max(0, milliseconds / 1000)
+        return "用时 \(seconds / 60)分\(String(format: "%02d", seconds % 60))秒"
     }
 }
 

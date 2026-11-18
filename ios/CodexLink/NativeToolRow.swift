@@ -121,7 +121,7 @@ struct NativeToolDetail: View {
     @AppStorage("native.diffLineWrapping") private var diffWrapping = true
     @State private var loading = false
     @State private var error = ""
-    private var row: NativeRow? { chat.session?.identity == sessionIdentity ? chat.rows.first { $0.key == rowKey } : nil }
+    private var row: NativeRow? { chat.session?.identity == sessionIdentity ? chat.row(forKey: rowKey) : nil }
     private var wrapsLines: Binding<Bool> { row?.kind == "fileChange" ? $diffWrapping : $commandWrapping }
     var body: some View {
         NavigationStack {

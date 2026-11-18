@@ -66,6 +66,12 @@ class LiveSession:
     def view(self):
         with self.condition:
             result = normalize_state(self.state or {"id": self.id}, self.connected)
+            if self.saved_view:
+                saved_turns = {turn['id']: turn for turn in self.saved_view['turns']}
+                for turn in result['turns']:
+                    for field in ('startedAt', 'endedAt', 'durationMs'):
+                        if turn.get(field) is None:
+                            turn[field] = saved_turns.get(turn['id'], {}).get(field)
             # Native paginated snapshots only contain the loaded tail. Keep the
             # saved prefix in the presentation, never in the IPC patch base.
             if self.saved_view and not result['historyComplete']:
@@ -1143,8 +1149,13 @@ class Bridge:
         # Expand saved history only when the reader reaches its loaded edge.
         if mode == 'page' and options.get('before'):
             with session.condition:
-                position = session.timeline.position(options['before'])
-                expand = position is not None and position < options.get('limit', 20) and session.saved_view and not session.saved_view['historyComplete']
+                if options.get('grouped'):
+                    position = next((i for i, row in enumerate(session.timeline.group_rows)
+                                     if session.timeline.cursor(row['key']) == options['before']), None)
+                    edge = options.get('limit', 20) * 3
+                else:
+                    position, edge = session.timeline.position(options['before']), options.get('limit', 20)
+                expand = position is not None and position < edge and session.saved_view and not session.saved_view['historyComplete']
                 if expand:
                     session.history_limit += 50
             if expand:
@@ -1160,9 +1171,13 @@ class Bridge:
             # older pages briefly render raw localImage paths after an upgrade.
             self._annotate_upload_attachments(session, projection.rows)
             self._merge_submission_attachments(session, projection.rows)
+            self._merge_submission_attachments(session, projection.group_rows)
             if mode == 'detail':
                 result = projection.detail(**options)
                 texts = [projection.details[result['key']]]
+            elif mode == 'process':
+                result = projection.process(**options)
+                texts = [row['text'] for row in result['rows'] if row['role'] == 'assistant']
             else:
                 result = projection.changes(**options) if mode == 'changes' else projection.page(**options)
                 result['meta'] = dict(result['meta'], host=self.host,
@@ -1173,7 +1188,7 @@ class Bridge:
         file_state = {'cwd': cwd, 'turns': [{'items': [{'type': 'agentMessage', 'text': text} for text in texts]}]}
         artifacts = artifact_paths(file_state, self.store.home) if self.host == 'local' else {}
         result['files'] = [{'id': k, 'name': v['name'], 'reference': v['reference'], 'image': v['image']} for k, v in artifacts.items()]
-        if mode != 'detail':
+        if mode not in ('detail', 'process'):
             self._submission_meta(session, result['meta'])
             result['meta']['forkedFrom'] = self._fork_origin(thread_id)
         return result

@@ -157,6 +157,11 @@ final class NativeComposerDraft: ObservableObject {
 
 @MainActor
 final class ChatModel: ObservableObject {
+    private struct ProcessCache {
+        let version: String
+        var rows: [NativeRow]
+        var next: Int?
+    }
     let api: NativeAPI
     @Published var session: LinkSession?
     @Published var rows: [NativeRow] = []
@@ -189,6 +194,10 @@ final class ChatModel: ObservableObject {
     private var loadedLogView: Bool?
     private var generation = 0
     private var details: [String: (version: JSONValue, text: String, next: Int?)] = [:]
+    private var processCache: [String: ProcessCache] = [:]
+    private var processLoadingTurns = Set<String>()
+    private var processErrors: [String: String] = [:]
+    private var processExpansionOverrides: [String: Bool] = [:]
     private var detailLoads: [String: Task<Void, Error>] = [:]
     private var diffStats: [String: (version: JSONValue, value: NativeDiffStats)] = [:]
     private var diffLoads = Set<String>()
@@ -253,10 +262,89 @@ final class ChatModel: ObservableObject {
     var running: Bool { meta["status"].string == "active" }
     var canSend: Bool { connected && !busy && (!draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !draft.attachments.isEmpty) }
     var requests: [JSONValue] { readOnly ? [] : meta["requests"].array }
-    var visibleRows: [NativeRow] { rows.filter { $0.kind != "reasoning" } }
+    var visibleRows: [NativeRow] {
+        let mainKeys = Set(rows.map(\.key))
+        return rows.flatMap { row in
+            row.isTurnSummary && processExpanded(row)
+                ? [row] + (row.turnId.flatMap { processCache[$0]?.rows } ?? []).filter { !mainKeys.contains($0.key) }
+                : [row]
+        }.filter { $0.kind != "reasoning" }
+    }
     func cursor(for row: NativeRow) -> String { epoch + "." + row.key }
     func rowText(_ row: NativeRow) -> String { details[row.key]?.version == row.version ? details[row.key]!.text : row.text }
     func rowHasMore(_ row: NativeRow) -> Bool { if let detail = details[row.key], detail.version == row.version { return detail.next != nil }; return row.truncated == true }
+    func row(forKey key: String) -> NativeRow? {
+        rows.first { $0.key == key } ?? processCache.values.lazy.compactMap { $0.rows.first { $0.key == key } }.first
+    }
+    func processExpanded(_ row: NativeRow) -> Bool {
+        guard row.isTurnSummary, let turnId = row.turnId else { return false }
+        return processExpansionOverrides[turnId] ?? row.turnRunning
+    }
+    func processRows(_ row: NativeRow) -> [NativeRow] {
+        let mainKeys = Set(rows.map(\.key))
+        return (row.turnId.flatMap { processCache[$0]?.rows } ?? []).filter { !mainKeys.contains($0.key) }
+    }
+    func insideProcess(_ row: NativeRow) -> Bool {
+        !rows.contains(where: { $0.key == row.key })
+    }
+    func processState(_ row: NativeRow) -> NativeTurnProcessState? {
+        guard row.isTurnSummary, let turnId = row.turnId else { return nil }
+        let cached = processCache[turnId]
+        let showLoading = cached == nil || cached?.rows.isEmpty == true ||
+            (cached?.version == row.version.identifier && cached?.next != nil)
+        return NativeTurnProcessState(expanded: processExpanded(row), loading: processLoadingTurns.contains(turnId) && showLoading,
+                                      hasMore: cached?.next != nil, error: processErrors[turnId] ?? "")
+    }
+    func toggleProcess(_ row: NativeRow) {
+        guard let turnId = row.turnId else { return }
+        let expanded = !processExpanded(row)
+        processExpansionOverrides[turnId] = expanded
+        revision += 1
+        if expanded { Task { await loadProcess(row) } }
+    }
+    func loadProcess(_ row: NativeRow, more: Bool = false) async {
+        guard row.isTurnSummary, let turnId = row.turnId, let target = session,
+              rows.contains(where: { $0.key == row.key }), !processLoadingTurns.contains(turnId) else { return }
+        let cached = processCache[turnId]
+        if !more, cached?.version == row.version.identifier { return }
+        if row.processCount == 0 {
+            processCache[turnId] = ProcessCache(version: row.version.identifier, rows: [], next: nil)
+            revision += 1; return
+        }
+        let append = more && cached?.version == row.version.identifier
+        if append && cached?.next == nil { return }
+        let token = generation, currentEpoch = epoch
+        processLoadingTurns.insert(turnId); processErrors.removeValue(forKey: turnId); revision += 1
+        defer { if token == generation { processLoadingTurns.remove(turnId); revision += 1 } }
+        do {
+            var loaded = append ? cached!.rows : []
+            var offset = append ? cached!.next! : 0
+            let wanted = row.turnRunning ? Int.max : max(40, append ? loaded.count + 40 : cached?.rows.count ?? 0)
+            var next: Int?
+            repeat {
+                var query = params(); query["turn"] = turnId; query["offset"] = String(offset); query["limit"] = "40"
+                let page: NativeProcessPage = try await api.request(path("process"), query: query)
+                guard !Task.isCancelled, token == generation, currentEpoch == epoch, session?.identity == target.identity,
+                      rows.contains(where: { $0.key == row.key && $0.version == row.version }),
+                      page.epoch == currentEpoch, page.turnId == turnId, page.summaryVersion == row.version.identifier else { return }
+                loaded += page.rows
+                mergeFiles(page.files ?? [])
+                next = page.next
+                if let next, next <= offset { throw LinkError.message("任务过程分页未推进，请重试") }
+                offset = next ?? offset
+            } while next != nil && loaded.count < wanted
+            processCache[turnId] = ProcessCache(version: row.version.identifier, rows: loaded, next: next)
+        } catch {
+            if token == generation && session?.identity == target.identity && !Task.isCancelled {
+                processErrors[turnId] = error.localizedDescription
+            }
+        }
+    }
+    private func refreshExpandedProcesses() async {
+        for row in rows where row.isTurnSummary && processExpanded(row) {
+            await loadProcess(row)
+        }
+    }
     func fileChangeStats(_ row: NativeRow) -> NativeDiffStats? { diffStats[row.key]?.version == row.version ? diffStats[row.key]?.value : nil }
     func loadFileChangeStats(_ row: NativeRow) async {
         guard row.kind == "fileChange", fileChangeStats(row) == nil else { return }
@@ -272,12 +360,16 @@ final class ChatModel: ObservableObject {
             let text = rowText(row)
             let value = await Task.detached(priority: .utility) { NativeDiffStats(NativeDiffDocument(text)) }.value
             guard !Task.isCancelled, token == generation, currentEpoch == epoch,
-                  rows.contains(where: { $0.key == row.key && $0.version == row.version }) else { return }
+                  rowExists(row) else { return }
             diffStats[row.key] = (row.version, value); revision += 1
         } catch { /* Opening the detail page offers an explicit retry on failure. */ }
     }
     func wasResponded(_ request: JSONValue) -> Bool { responded.contains(request["id"].identifier) }
-    private func params() -> [String: String] { ["host": session?.host ?? "local", "view": logView ? "log" : "live"] }
+    private func params() -> [String: String] { ["host": session?.host ?? "local", "view": logView ? "log" : "live", "projection": "turns"] }
+    private func rowExists(_ row: NativeRow) -> Bool {
+        rows.contains(where: { $0.key == row.key && $0.version == row.version }) ||
+            processCache.values.contains { $0.rows.contains(where: { $0.key == row.key && $0.version == row.version }) }
+    }
     private func path(_ action: String) -> String { "/api/native/v1/threads/\(session!.id)/\(action)" }
     private func actionPath(_ action: String) -> String { "/api/sessions/\(session!.id)/\(action)" }
     func primeDraft(_ text: String, for target: LinkSession) {
@@ -294,10 +386,11 @@ final class ChatModel: ObservableObject {
         flushDraft()
         let canResumeTimeline = target != nil && session?.identity == target?.identity && loadedLogView == logView && sequence >= 0
         generation += 1; let token = generation
+        processLoadingTurns = []
         session = target
         error = ""; pollingError = ""
         if !canResumeTimeline {
-            rows = []; files = []; details = [:]; diffStats = [:]; meta = .null; capabilities = .null; epoch = ""; sequence = -1; before = nil; notice = ""; responded = []; loadingOlder = false
+            rows = []; files = []; details = [:]; processCache = [:]; processLoadingTurns = []; processErrors = [:]; processExpansionOverrides = [:]; diffStats = [:]; meta = .null; capabilities = .null; epoch = ""; sequence = -1; before = nil; notice = ""; responded = []; loadingOlder = false
             loadedLogView = nil
             isRestoringDraft = true
             draft = target.map { restoredDraft(for: $0.identity) } ?? ChatDraft()
@@ -312,6 +405,8 @@ final class ChatModel: ObservableObject {
                 let page: TimelinePage = try await api.request(path("timeline"), query: params())
                 guard token == generation, !Task.isCancelled else { return }
                 apply(page, replace: true); loadedLogView = logView
+                loading = false
+                await refreshExpandedProcesses()
                 await sendPrimedDraftIfReady()
                 if let target, target.readOnly == true, target.host == "local", target.originator == "codex-tui" {
                     Task { await convertCLIIfNeeded(target) }
@@ -326,7 +421,8 @@ final class ChatModel: ObservableObject {
                 let page: TimelinePage = try await api.request(path(sequence < 0 ? "timeline" : "changes"), query: query)
                 guard token == generation, !Task.isCancelled else { return }
                 if !pollingError.isEmpty { pollingError = "" }
-                apply(page, replace: page.reset == true || sequence < 0); await sendPrimedDraftIfReady()
+                apply(page, replace: page.reset == true || sequence < 0)
+                await refreshExpandedProcesses(); await sendPrimedDraftIfReady()
             } catch is CancellationError { return }
             catch { if !Task.isCancelled && token == generation { self.pollingError = error.localizedDescription } }
         }
@@ -359,10 +455,11 @@ final class ChatModel: ObservableObject {
         // and the reading anchor when a polling reset races with pagination.
         if replace {
             if !details.isEmpty || !diffStats.isEmpty { revision += 1 }
-            details = [:]; diffStats = [:]; epoch = page.epoch
+            details = [:]; processCache = [:]; processLoadingTurns = []; processErrors = [:]; processExpansionOverrides = [:]; diffStats = [:]; epoch = page.epoch
         }
-        if replace || !page.rows.isEmpty {
+        if replace || !page.rows.isEmpty || !(page.removed ?? []).isEmpty {
             var mapping = Dictionary(uniqueKeysWithValues: (replace ? [] : rows).map { ($0.key, $0) })
+            for key in page.removed ?? [] { mapping.removeValue(forKey: key) }
             for row in page.rows { mapping[row.key] = row }
             let updated = mapping.values.sorted { $0.order == $1.order ? $0.key < $1.key : $0.order < $1.order }
             if rows != updated { rows = updated }
@@ -376,8 +473,11 @@ final class ChatModel: ObservableObject {
             before = page.before
             if hasMore != (page.hasMore ?? false) { hasMore = page.hasMore ?? false }
         }
+        mergeFiles(page.files ?? [])
+    }
+    private func mergeFiles(_ incoming: [JSONValue]) {
         var artifacts = Dictionary(uniqueKeysWithValues: files.map { ($0["id"].string, $0) })
-        for file in page.files ?? [] { artifacts[file["id"].string] = file }
+        for file in incoming { artifacts[file["id"].string] = file }
         let updatedFiles = artifacts.values.sorted { $0["name"].string < $1["name"].string }
         if files != updatedFiles { files = updatedFiles }
     }
@@ -395,7 +495,7 @@ final class ChatModel: ObservableObject {
         } catch { if token == generation { self.error = error.localizedDescription } }
     }
     func expand(_ row: NativeRow) async throws {
-        guard session != nil, rows.contains(where: { $0.key == row.key && $0.version == row.version }) else { throw CancellationError() }
+        guard session != nil, rowExists(row) else { throw CancellationError() }
         let token = generation, currentEpoch = epoch
         let offset = details[row.key]?.version == row.version ? details[row.key]?.next ?? 0 : 0
         let key = "\(generation)|\(epoch)|\(row.key)|\(row.version.identifier)|\(offset)"
@@ -413,7 +513,7 @@ final class ChatModel: ObservableObject {
         let result = try await api.value("/api/native/v1/threads/\(target.id)/detail", query: query)
         try Task.checkCancellation()
         guard token == generation, currentEpoch == epoch, session?.identity == target.identity, result["version"] == row.version, result["offset"].int == offset,
-              rows.contains(where: { $0.key == row.key && $0.version == row.version }) else { throw LinkError.message("内容已变化，请重新展开") }
+              rowExists(row) else { throw LinkError.message("内容已变化，请重新展开") }
         let text = (offset == 0 ? "" : details[row.key]?.text ?? "") + result["text"].string
         details[row.key] = (row.version, text, result["next"] == .null ? nil : result["next"].int); revision += 1
     }
@@ -515,7 +615,7 @@ final class ChatModel: ObservableObject {
         flushDraft()
         return true
     }
-    func clear() { detailLoads.values.forEach { $0.cancel() }; detailLoads = [:]; diffLoads = []; details = [:]; diffStats = [:]; flushDraft(); draftSaveTask?.cancel(); draftSaveTask = nil; generation += 1; sending = []; autoSend = []; drafts = [:]; session = nil; draft = ChatDraft(); rows = []; meta = .null; files = []; loadedLogView = nil; logView = false }
+    func clear() { detailLoads.values.forEach { $0.cancel() }; detailLoads = [:]; diffLoads = []; details = [:]; processCache = [:]; processLoadingTurns = []; processErrors = [:]; processExpansionOverrides = [:]; diffStats = [:]; flushDraft(); draftSaveTask?.cancel(); draftSaveTask = nil; generation += 1; sending = []; autoSend = []; drafts = [:]; session = nil; draft = ChatDraft(); rows = []; meta = .null; files = []; loadedLogView = nil; logView = false }
 }
 
 enum NativeSendMode {

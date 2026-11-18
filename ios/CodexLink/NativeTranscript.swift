@@ -85,7 +85,7 @@ struct NativeTranscript: UIViewControllerRepresentable {
                 cell.contentConfiguration = UIHostingConfiguration {
                     row.equatable().environment(\.openURL, openURL)
                         .task(id: row.cursor + row.row.version.identifier) { await row.onLoadStats() }
-                        .padding(.top, index == 0 ? 0 : compact ? 6 : 24)
+                        .padding(.top, index == 0 || row.insideProcess ? 0 : compact ? 6 : 24)
                         .padding(.horizontal, 22)
                         .frame(maxWidth: 820, maxHeight: .infinity, alignment: .topLeading)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -103,17 +103,24 @@ struct NativeTranscript: UIViewControllerRepresentable {
             let newIDs = next.rows.map { $0.row.key } + [footerKey]
             let nextEntries = Dictionary(uniqueKeysWithValues: next.rows.map { ($0.row.key, $0) })
             var changed = next.rows.filter { entries[$0.row.key] != $0 }.map { $0.row.key }
+            let toggledProcess = next.rows.contains {
+                if let previous = entries[$0.row.key], let old = previous.processState, let new = $0.processState {
+                    return old.expanded != new.expanded && previous.row.turnStatus == $0.row.turnStatus
+                }
+                return false
+            }
+            if toggledProcess { setFollowing(false) }
             let firstMessage = oldIDs.first.flatMap { $0 == footerKey ? nil : $0 }
             let prepend = !newIdentity && firstMessage.flatMap { newIDs.firstIndex(of: $0) }.map { $0 > 0 } == true
             if prepend, let first = oldIDs.first, !changed.contains(first) { changed.append(first) }
-            let anchor = prepend ? visibleAnchor() : nil
+            let anchor = !newIdentity && (prepend || !following) ? visibleAnchor(keeping: Set(newIDs)) : nil
             input = next; self.openURL = openURL; entries = nextEntries
             if prepend {
                 let existing = Set(oldIDs)
                 for (index, row) in next.rows.enumerated() where !existing.contains(row.row.key) || row.row.key == firstMessage {
                     let compact = index > 0 && row.row.isProcess && next.rows[index - 1].row.isProcess
                     let host = UIHostingController(rootView: row.environment(\.openURL, openURL)
-                        .padding(.top, index == 0 ? 0 : compact ? 6 : 24).padding(.horizontal, 22)
+                        .padding(.top, index == 0 || row.insideProcess ? 0 : compact ? 6 : 24).padding(.horizontal, 22)
                         .frame(maxWidth: 820).frame(maxWidth: .infinity))
                     let size = host.sizeThatFits(in: CGSize(width: tableView.bounds.width, height: .greatestFiniteMagnitude))
                     heights[row.row.key] = ceil(size.height * tableView.traitCollection.displayScale) / tableView.traitCollection.displayScale
@@ -150,9 +157,9 @@ struct NativeTranscript: UIViewControllerRepresentable {
             }
         }
 
-        private func visibleAnchor() -> (key: String, y: CGFloat)? {
+        private func visibleAnchor(keeping keys: Set<String>) -> (key: String, y: CGFloat)? {
             for path in tableView.indexPathsForVisibleRows ?? [] {
-                guard let key = source.itemIdentifier(for: path), key != footerKey else { continue }
+                guard let key = source.itemIdentifier(for: path), key != footerKey, keys.contains(key) else { continue }
                 let rect = tableView.rectForRow(at: path)
                 if rect.maxY > tableView.contentOffset.y {
                     return (key, rect.minY - tableView.contentOffset.y)

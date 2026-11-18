@@ -21,9 +21,10 @@ from test_settings import FakeRuntime, FakeSchema
 from mac.settings import CodexSettings
 from bridge.uploads import Uploads
 from bridge.service import LiveSession
+from bridge.timeline import group_turn, bounded_process
 from mac import workspace_http
 
-directory = tempfile.TemporaryDirectory()
+directory = tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1] / 'build')
 root = Path(directory.name).resolve()
 home = root / 'codex'; home.mkdir()
 project = root / 'sample-project'; project.mkdir()
@@ -100,6 +101,8 @@ class NativeFixture(SpyBridge):
         self.rejected_steers = 0
         self.last_creation = None
         self.user_message = '请完善远程会话的原生界面。'
+        self.process_reads = 0
+        self.process_running = False
     def session(self, key, **_):
         self.store.get(key)
         return self.live.setdefault(key, LiveSession(key))
@@ -174,9 +177,30 @@ class NativeFixture(SpyBridge):
                                      text=text, order=i, version='v1', truncated=False))
             return {'epoch': 'synthetic', 'sequence': self.sequence, 'rows': rendered if mode == 'page' or options.get('after') != self.sequence else [],
                     'reset': mode == 'changes' and options.get('after') != self.sequence, 'before': 'synthetic.render-0', 'hasMore': False, 'meta': meta}
+        if options.get('grouped') or mode == 'process':
+            for index, row in enumerate(rows):
+                row.update(turnId='synthetic-turn', turnStatus='inProgress' if self.process_running else 'completed', order=index)
+            if self.process_running:
+                rows = [row for row in rows if row['key'] != 'a1']
+                rows += [dict(key='process-progress', role='assistant', kind='agentMessage', phase='commentary',
+                              text='Synthetic process commentary', order=6, version='v1', turnId='synthetic-turn'),
+                         dict(key='process-steer', role='user', kind='steeringUserMessage', text='Synthetic additional input',
+                              order=7, version='v1', turnId='synthetic-turn')]
+                meta['status'] = 'active'
+            projected, process, summary = group_turn(rows, dict(id='synthetic-turn', status='inProgress' if self.process_running else 'completed',
+                                                              startedAt=int(time.time() * 1000) - 65000, durationMs=65000))
+            if mode == 'process':
+                self.process_reads += 1
+                if options.get('turnId') != 'synthetic-turn': raise ValueError('Unknown synthetic turn')
+                selected, next_offset = bounded_process(process, options.get('offset', 0), options.get('limit', 40))
+                return dict(epoch='synthetic', turnId='synthetic-turn', summaryVersion=summary['version'], rows=selected,
+                            next=next_offset, hasMore=next_offset is not None, files=ARTIFACT_ROWS)
+            rows = projected
         return {'epoch': 'synthetic', 'sequence': self.sequence, 'rows': rows if mode == 'page' or options.get('after') != self.sequence else [], 'before': 'synthetic.u1', 'hasMore': False, 'meta': meta, 'files': ARTIFACT_ROWS}
     def send(self, thread, text, identifier, mode="send", *_, **__):
         self.last_send_mode = mode
+        if text == 'Synthetic process running': self.process_running = True
+        if text == 'Synthetic process completed': self.process_running = False
         if text == 'Synthetic finished steer race' and mode == 'steer':
             self.rejected_steers += 1
             raise ValueError('当前任务已经结束，请使用普通发送')
@@ -204,7 +228,7 @@ class NativeFixture(SpyBridge):
     def interrupt(self, key): self.sequence += 1; return {'ok': True}
     def respond(self, key, request, response): self.responses.append((key, request, response)); return {'ok': True}
     def catalog(self, key, refresh=False):
-        return {'models': [{'id': 'gpt-5.4', 'name': 'GPT-5.4', 'efforts': ['low', 'medium', 'high'], 'defaultEffort': 'medium'}, {'id': 'synthetic-restricted', 'name': 'Synthetic Restricted', 'efforts': ['minimal', 'high'], 'defaultEffort': 'high'}], 'skills': [], 'sendCount': len(self.submissions), 'lastAttemptCount': list(self.attempts.values())[-1] if self.attempts else 0, 'lastSendMode': self.last_send_mode, 'rejectedSteers': self.rejected_steers, 'lastCreation': self.last_creation}
+        return {'models': [{'id': 'gpt-5.4', 'name': 'GPT-5.4', 'efforts': ['low', 'medium', 'high'], 'defaultEffort': 'medium'}, {'id': 'synthetic-restricted', 'name': 'Synthetic Restricted', 'efforts': ['minimal', 'high'], 'defaultEffort': 'high'}], 'skills': [], 'sendCount': len(self.submissions), 'lastAttemptCount': list(self.attempts.values())[-1] if self.attempts else 0, 'lastSendMode': self.last_send_mode, 'rejectedSteers': self.rejected_steers, 'lastCreation': self.last_creation, 'processReads': self.process_reads}
     def upload(self, key, identifier, name, data): return self.uploads.put(key, identifier, name, data)
     def settings(self, key, model, effort, **kwargs):
         self.model, self.effort = model, effort

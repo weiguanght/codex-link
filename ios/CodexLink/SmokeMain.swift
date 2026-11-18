@@ -60,6 +60,36 @@ final class NativeSmoke: ObservableObject {
     @Published var result = "Testing…"
     init() { let api = NativeAPI(); self.api = api; workspace = WorkspaceModel(api: api); chat = ChatModel(api: api) }
     func require(_ value: Bool, _ message: String) throws { if !value { throw LinkError.message(message) } }
+    private func verifyTurnProcessLifecycle(_ desktop: LinkSession) async throws {
+        let source = ChatModel(api: api)
+        let sourceTask = Task { await source.run(desktop) }
+        defer { sourceTask.cancel() }
+        for _ in 0..<80 {
+            if source.connected { break }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        source.draft.text = "Synthetic process running"
+        await source.send()
+        let executing = ChatModel(api: api)
+        let executingTask = Task { await executing.run(desktop) }
+        defer { executingTask.cancel() }
+        for _ in 0..<100 {
+            if executing.visibleRows.contains(where: { $0.key == "process-steer" }) { break }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        guard let activeSummary = executing.rows.first(where: \.isTurnSummary) else { throw LinkError.message("Running turn missing") }
+        try require(activeSummary.turnRunning && executing.processExpanded(activeSummary), "Running turn did not expand automatically")
+        try require(executing.rows.count == 2 && executing.visibleRows.contains(where: { $0.key == "process-progress" }) &&
+                    executing.visibleRows.contains(where: { $0.key == "process-steer" }), "Running commentary or steering escaped the process block")
+        executing.draft.text = "Synthetic process completed"
+        await executing.send()
+        for _ in 0..<100 {
+            if executing.rows.first(where: \.isTurnSummary)?.turnRunning == false { break }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        guard let finishedSummary = executing.rows.first(where: \.isTurnSummary) else { throw LinkError.message("Completed turn missing") }
+        try require(!executing.processExpanded(finishedSummary) && executing.visibleRows.count == 3, "Finished turn did not collapse around its final answer")
+    }
     private func verifyShellCommandSummary() throws {
         let commands: [(String, String)] = [
             (#"/bin/zsh -lc "git status --short""#, "git status --short"),
@@ -261,13 +291,23 @@ final class NativeSmoke: ObservableObject {
                 try require(restrictedEfforts.values == ["minimal", "high"] && restrictedEfforts.selection("low") == "high", "Model switch ignored supported efforts or default")
                 try require(restrictedEfforts.selection("high") == "high" && NativeModelEfforts(catalog: .null, model: "custom").values.contains("xhigh"), "Reasoning effort fallback failed")
                 checks.append("model reasoning options + preserve compatible selection + model default + unavailable catalog fallback")
-                guard let fileChange = testing.rows.first(where: { $0.kind == "fileChange" }) else { throw LinkError.message("File change fixture missing") }
+                guard let processSummary = testing.rows.first(where: \.isTurnSummary) else { throw LinkError.message("Turn summary fixture missing") }
+                try require(!testing.processExpanded(processSummary) && testing.visibleRows.count == 3, "Completed turn is not collapsed")
+                try require(catalog["processReads"].int == 0, "Completed process was eagerly fetched")
+                await testing.loadProcess(processSummary)
+                testing.toggleProcess(processSummary)
+                try require(testing.visibleRows.contains(where: { $0.kind == "commandExecution" }), "Expanded process records missing")
+                guard let fileChange = testing.processRows(processSummary).first(where: { $0.kind == "fileChange" }) else { throw LinkError.message("File change fixture missing") }
+                try require(testing.row(forKey: fileChange.key) == fileChange, "Lazy tool row lookup failed")
+                checks.append("completed turn opening/final only + no eager process request + expand lazy tools")
                 async let firstStats: Void = testing.loadFileChangeStats(fileChange)
                 async let secondStats: Void = testing.loadFileChangeStats(fileChange)
                 _ = await (firstStats, secondStats)
                 try require(testing.fileChangeStats(fileChange)?.added == 2 && testing.fileChangeStats(fileChange)?.removed == 2, "Full tool diff stats missing or incorrect")
                 try require(!testing.rowHasMore(fileChange), "Tool stats used a partial patch")
                 checks.append("full paginated file-change stats + shared detail loading")
+                testing.toggleProcess(processSummary)
+                try require(testing.visibleRows.count == 3, "Closing process left intermediate records visible")
                 let browser = NativeWorkspaceBrowserModel(api: api, session: desktop)
                 await browser.loadRepositories()
                 try require(browser.repositories.map(\.path) == ["", "apps/client", "apps/tools/worker"], "Nested repository discovery failed")
@@ -409,6 +449,8 @@ final class NativeSmoke: ObservableObject {
                 checks.append("relaunch without replay + stable retry ID + acknowledged cleanup + forget cancels save")
                 checks.append("native send + uncertain retry ID + stop + approval response")
                 checks.append("idle follow-up sends normally + finished-task race fallback + uncertain steering retry retains ID")
+                try await verifyTurnProcessLifecycle(desktop)
+                checks.append("running process auto-expands + intermediate model/user messages stay inside + completion auto-collapses")
             }
             if let desktop = workspace.sessions.first(where: { $0.readOnly != true }) {
                 try await workspace.preferences([desktop], changes: ["pinned": .bool(true), "unread": .bool(true)])

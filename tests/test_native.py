@@ -79,6 +79,33 @@ class NativeHTTPTests(unittest.TestCase):
         self.assertIsNone(result['usage']['estimatedCostUSD'])
         self.assertEqual(self.calls, [])
 
+    def test_turn_projection_and_lazy_process_share_authenticated_read_boundary(self):
+        path = '/api/native/v1/threads/' + history.uid(1)
+        metadata = self.server.reading.metadata(history.uid(1))
+        with open(metadata['rollout_path'], 'w') as stream:
+            stream.write(history.record('session_meta', {'id': history.uid(1)}))
+            stream.write(history.record('event_msg', {'type': 'task_started', 'turn_id': 'test-turn'}))
+            stream.write(history.message('user', 'opening'))
+            stream.write(history.record('response_item', {'type': 'message', 'role': 'assistant', 'phase': 'commentary', 'content': 'progress'}))
+            stream.write(history.message('user', 'additional'))
+            stream.write(history.message('assistant', 'final'))
+            stream.write(history.record('event_msg', {'type': 'task_complete', 'turn_id': 'test-turn'}))
+        self.assertEqual(self.request(path + '/process?turn=test-turn')[0], 401)
+        headers = self.authenticate()
+        code, page, _ = self.request(path + '/timeline?projection=turns&limit=1', headers=headers)
+        self.assertEqual(code, 200)
+        self.assertEqual([r['text'] for r in page['rows']], ['opening', '', 'final'])
+        code, process, _ = self.request(path + '/process?turn=test-turn&limit=1', headers=headers)
+        self.assertEqual(code, 200)
+        self.assertTrue(process['capabilities']['readOnly'])
+        self.assertEqual([r['text'] for r in process['rows']], ['progress'])
+        self.assertEqual(process['next'], 1)
+        self.assertEqual(self.request(path + '/process?turn=unknown', headers=headers)[0], 409)
+        self.assertEqual(self.request(path + '/process?turn=test-turn&limit=invalid', headers=headers)[0], 400)
+        self.assertEqual(self.request(path + '/process?turn=test-turn', headers={**headers, 'Origin': 'https://other.invalid'})[0], 403)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.server.bridge.activated, [])
+
     def test_desktop_projection_retains_controller_and_explicit_log_is_readonly(self):
         headers = self.authenticate(); path = '/api/native/v1/threads/' + history.uid(2)
         code, value, _ = self.request(path + '/timeline', headers=headers)

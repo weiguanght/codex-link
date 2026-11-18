@@ -95,18 +95,34 @@ struct NativeRow: Decodable, Identifiable, Equatable {
     let inputLength: Int?
     let exitCode: Int?
     let durationMs: Int?
+    let turnId: String?
+    let turnStatus: String?
+    let processCount: Int?
+    let startedAtMs: Int?
     var id: String { key }
     var isProcess: Bool { role == "activity" }
+    var isTurnSummary: Bool { kind == "turnSummary" }
+    var turnRunning: Bool { ["inProgress", "in_progress", "running", "active"].contains(turnStatus ?? "") }
 }
 struct TimelinePage: Decodable {
     let epoch: String
     let sequence: Int
     let rows: [NativeRow]
+    let removed: [String]?
     let before: String?
     let hasMore: Bool?
     let reset: Bool?
     let meta: JSONValue
     let capabilities: JSONValue
+    let files: [JSONValue]?
+}
+struct NativeProcessPage: Decodable {
+    let epoch: String
+    let turnId: String
+    let summaryVersion: String?
+    let rows: [NativeRow]
+    let next: Int?
+    let hasMore: Bool
     let files: [JSONValue]?
 }
 

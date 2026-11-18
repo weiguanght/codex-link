@@ -5,8 +5,10 @@ history invalidates them explicitly; appending or editing text does not.
 """
 import hashlib
 import json
+import time
 import uuid
 from collections import OrderedDict
+from datetime import datetime
 
 PAGE_BYTES = 192 * 1024
 TEXT_PREVIEW = 8000
@@ -15,6 +17,58 @@ DETAIL_CHARS = 16000
 
 def encoded(value):
     return json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode()
+
+
+def timestamp_ms(value):
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return int(value if value > 10**12 else value * 1000)
+    if isinstance(value, str):
+        try:
+            return int(datetime.fromisoformat(value.replace('Z', '+00:00')).timestamp() * 1000)
+        except (ValueError, OverflowError):
+            pass
+    return None
+
+
+def group_turn(rows, turn):
+    """Project metadata only; process text is delivered on explicit expansion."""
+    if not rows:
+        return [], [], None
+    opening = next((r for r in rows if r['role'] == 'user' and r.get('kind') != 'steeringUserMessage'), None)
+    status = turn.get('status')
+    running = status in ('inProgress', 'in_progress', 'running', 'active')
+    final = next((r for r in reversed(rows) if r['role'] == 'assistant' and r.get('phase') == 'final_answer'), None)
+    if final is None and not running:
+        final = next((r for r in reversed(rows) if r['role'] == 'assistant' and r.get('phase') != 'commentary'), None)
+    boundary = {r['key'] for r in (opening, final) if r is not None}
+    process = [r for r in rows if r['key'] not in boundary and r.get('kind') != 'reasoning']
+    started, ended = turn.get('startedAt'), turn.get('endedAt')
+    duration = turn.get('durationMs')
+    if isinstance(started, (int, float)) and isinstance(ended, (int, float)):
+        duration = max(0, int(ended - started))
+    version = hashlib.sha256(encoded([[r['key'], r['version'], r.get('status'), r.get('exitCode'), r.get('durationMs')]
+                                     for r in process])).hexdigest()[:24]
+    summary = dict(key=hashlib.sha256(encoded([turn['id'], 'turnProcess'])).hexdigest()[:24] + '-process',
+                   version=version, turnId=turn['id'], turnStatus=status, role='process', kind='turnSummary',
+                   order=opening['order'] * 2 + 1 if opening else rows[0]['order'] * 2 - 1, text='',
+                   processCount=len(process), startedAtMs=started, durationMs=duration)
+    main = ([dict(opening, order=opening['order'] * 2)] if opening else []) + [summary]
+    if final:
+        main.append(dict(final, order=final['order'] * 2))
+    return main, process, summary
+
+
+def bounded_process(rows, offset=0, limit=40):
+    offset, limit = max(0, int(offset)), max(1, min(100, int(limit)))
+    selected, size = [], 0
+    for row in rows[offset:offset + limit]:
+        cost = len(encoded(row))
+        if selected and size + cost > PAGE_BYTES:
+            break
+        selected.append(row)
+        size += cost
+    end = offset + len(selected)
+    return selected, end if end < len(rows) else None
 
 
 class Timeline:
@@ -27,6 +81,10 @@ class Timeline:
         self.positions = {}
         self.versions = OrderedDict()
         self.meta = {}
+        self.group_rows = []
+        self.processes = {}
+        self.summaries = {}
+        self.group_versions = OrderedDict()
 
     def update(self, view):
         if self.sequence == view['sequence']:
@@ -77,6 +135,7 @@ class Timeline:
         if old_keys != new_keys[first:first + len(old_keys)]:
             self.epoch = uuid.uuid4().hex
             self.versions.clear()
+            self.group_versions.clear()
             self.order_origin = 0
         elif old_keys:
             self.order_origin -= first
@@ -93,6 +152,27 @@ class Timeline:
         self.versions[self.sequence] = {row['key']: hashlib.sha256(encoded(row)).digest() for row in rows}
         while len(self.versions) > 16:
             self.versions.popitem(last=False)
+        turns = {turn['id']: turn for turn in view['turns']}
+        by_turn = {}
+        for row in rows:
+            by_turn.setdefault(row['turnId'], []).append(row)
+        grouped, processes, summaries = [], {}, {}
+        for turn_id, turn_rows in by_turn.items():
+            turn = dict(turns[turn_id])
+            previous = self.summaries.get(turn_id)
+            if previous and turn.get('endedAt') is None and turn.get('durationMs') is None:
+                if previous.get('turnStatus') in ('inProgress', 'in_progress', 'running', 'active'):
+                    if turn.get('status') in ('completed', 'failed', 'interrupted', 'cancelled') and isinstance(turn.get('startedAt'), (int, float)):
+                        turn['durationMs'] = max(0, int(time.time() * 1000 - turn['startedAt']))
+                elif previous.get('startedAtMs') == turn.get('startedAt'):
+                    turn['durationMs'] = previous.get('durationMs')
+            main, process, summary = group_turn(turn_rows, turn)
+            grouped.extend(main)
+            processes[turn_id], summaries[turn_id] = process, summary
+        self.group_rows, self.processes, self.summaries = grouped, processes, summaries
+        self.group_versions[self.sequence] = {row['key']: hashlib.sha256(encoded(row)).digest() for row in grouped}
+        while len(self.group_versions) > 16:
+            self.group_versions.popitem(last=False)
 
     def cursor(self, key):
         return self.epoch + '.' + key
@@ -103,7 +183,9 @@ class Timeline:
             return None
         return self.positions[key]
 
-    def page(self, limit=20, before=None):
+    def page(self, limit=20, before=None, grouped=False):
+        if grouped:
+            return self.group_page(limit, before)
         end = self.position(before) if before else len(self.rows)
         if end is None:
             return {**self.page(), 'reset': True}
@@ -121,7 +203,9 @@ class Timeline:
                 'before': self.cursor(selected[0]['key']) if selected else None,
                 'hasMore': start > 0 or self.meta.get('savedHistoryMore', False), 'meta': self.meta}
 
-    def changes(self, after, epoch, start):
+    def changes(self, after, epoch, start, grouped=False):
+        if grouped:
+            return self.group_changes(after, epoch, start)
         first = self.position(start) if start else None
         if epoch != self.epoch or after not in self.versions or (start and first is None):
             return {**self.page(), 'reset': True}
@@ -131,6 +215,47 @@ class Timeline:
         if len(rows) > 100 or sum(len(encoded(row)) for row in rows) > PAGE_BYTES:
             return {**self.page(), 'reset': True}
         return {'epoch': self.epoch, 'sequence': self.sequence, 'rows': rows, 'meta': self.meta}
+
+    def group_page(self, limit=20, before=None):
+        positions = {row['key']: i for i, row in enumerate(self.group_rows)}
+        prefix, _, key = (before or '').partition('.')
+        end = positions.get(key) if before else len(self.group_rows)
+        if before and (prefix != self.epoch or end is None):
+            return dict(self.group_page(limit), reset=True)
+        start, size, count = end, 0, 0
+        while start > 0 and count < max(1, min(100, limit)):
+            group_start = start - 1
+            turn_id = self.group_rows[group_start]['turnId']
+            while group_start > 0 and self.group_rows[group_start - 1]['turnId'] == turn_id:
+                group_start -= 1
+            cost = sum(len(encoded(row)) for row in self.group_rows[group_start:start])
+            if count and size + cost > PAGE_BYTES:
+                break
+            start, size, count = group_start, size + cost, count + 1
+        selected = self.group_rows[start:end]
+        return dict(epoch=self.epoch, sequence=self.sequence, rows=selected,
+                    before=self.cursor(selected[0]['key']) if selected else None,
+                    hasMore=start > 0 or self.meta.get('savedHistoryMore', False), meta=self.meta)
+
+    def group_changes(self, after, epoch, start):
+        positions = {row['key']: i for i, row in enumerate(self.group_rows)}
+        prefix, _, key = (start or '').partition('.')
+        first = positions.get(key) if start else 0
+        if epoch != self.epoch or after not in self.group_versions or (start and (prefix != epoch or first is None)):
+            return dict(self.group_page(), reset=True)
+        previous, current = self.group_versions[after], self.group_versions[self.sequence]
+        rows = [row for row in self.group_rows[first:] if previous.get(row['key']) != current[row['key']]]
+        removed = [key for key in previous if key not in current]
+        if len(rows) > 300 or sum(len(encoded(row)) for row in rows) > PAGE_BYTES:
+            return dict(self.group_page(), reset=True)
+        return dict(epoch=self.epoch, sequence=self.sequence, rows=rows, removed=removed, meta=self.meta)
+
+    def process(self, turnId, offset=0, limit=40):
+        if turnId not in self.processes:
+            raise ValueError('这轮任务的过程记录已更新，请刷新聊天')
+        rows, next_offset = bounded_process(self.processes[turnId], offset, limit)
+        return dict(epoch=self.epoch, turnId=turnId, summaryVersion=self.summaries[turnId]['version'],
+                    rows=rows, next=next_offset, hasMore=next_offset is not None)
 
     def detail(self, cursor, offset=0, version=None):
         position = self.position(cursor)

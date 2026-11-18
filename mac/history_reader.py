@@ -8,6 +8,7 @@ import uuid
 
 from .history_catalog import HistoryUnavailable, safe_log, identifier
 from .pricing import TOKEN_FIELDS, token_counts, price_estimate, service_tier
+from bridge.timeline import group_turn, timestamp_ms, encoded
 
 MAX_RECORD = 8 * 1024 * 1024
 PAGE_BYTES = 192 * 1024
@@ -106,6 +107,7 @@ class LogReader:
         previous_usage = None
         usage_parts = {}
         current_model, current_tier = initial_model, 'standard'
+        turn_meta, explicit_turn = {}, False
         # Read only the size observed at open; concurrent appended bytes belong
         # to the next snapshot. Unterminated invalid JSON is retried next time.
         boundary = fingerprint[2]
@@ -177,44 +179,72 @@ class LogReader:
                     raise HistoryUnavailable('日志的会话 ID 与索引不一致，已拒绝读取')
             if record.get('type') == 'turn_context' and payload.get('turn_id'):
                 turn = str(payload['turn_id'])
+                explicit_turn = True
                 last_user = None
             if record.get('type') == 'event_msg' and payload.get('type') == 'task_started':
                 serial += 1
                 turn = str(payload.get('turn_id') or 'turn-' + str(serial))
+                explicit_turn = True
+                turn_meta[turn] = dict(id=turn, status='inProgress', startedAt=timestamp_ms(record.get('timestamp')))
                 last_user = None
+            elif record.get('type') == 'event_msg' and payload.get('type') in ('task_complete', 'turn_aborted'):
+                completed_turn = str(payload.get('turn_id') or turn)
+                turn_meta.setdefault(completed_turn, dict(id=completed_turn)).update(
+                    status='completed' if payload['type'] == 'task_complete' else 'interrupted',
+                    endedAt=timestamp_ms(record.get('timestamp')))
+                explicit_turn = False
             for part, message in enumerate(extract(record)):
                 digest = hashlib.sha256(message['text'].encode()).hexdigest()[:24]
                 # Old logs may have no turn IDs. A new user prompt forms a
                 # boundary, except the paired event/response copy of that prompt.
                 if message['role'] == 'user':
                     paired = last_user and last_user[0] == digest and last_user[1] != message['origin']
-                    if not paired:
+                    if not paired and not explicit_turn:
                         serial += 1
                         turn = 'message-turn-' + str(serial)
                     last_user = (digest, message['origin'])
                 elif message['role'] == 'assistant':
                     last_user = None
                 family = (turn, message['family'])
+                mirror = (turn, message['family'], digest)
                 if message['origin'] == 'response_item':
-                    responses.add(family)
+                    responses.add(mirror)
                 item = {k: v for k, v in message.items() if k != 'text'}
                 item.update(key=f'{offset:x}-{part}', offset=offset, size=len(line), part=part,
-                            version=digest, turnId=turn, familyKey=family)
+                            version=digest, turnId=turn, familyKey=family, mirrorKey=mirror)
+                timing = turn_meta.setdefault(turn, dict(id=turn, status='completed'))
+                observed = timestamp_ms(record.get('timestamp'))
+                if timing.get('startedAt') is None and observed is not None:
+                    timing['startedAt'] = observed
+                if observed is not None and timing.get('status') != 'inProgress':
+                    timing['endedAt'] = observed
                 entries.append(item)
         if first_line:
             raise HistoryUnavailable('会话日志为空')
-        # Canonical response records win over mirrored events within a turn.
-        entries = [e for e in entries if not (e['origin'] == 'event_msg' and e['familyKey'] in responses and e['role'] != 'error')]
+        # Drop exact event/response mirrors, retaining distinct steering input
+        # and commentary that may exist only in an event within the same turn.
+        entries = [e for e in entries if not (e['origin'] == 'event_msg' and e['mirrorKey'] in responses and e['role'] != 'error')]
         for i, entry in enumerate(entries):
             entry['order'] = i
+        by_turn = {}
+        for entry in entries:
+            by_turn.setdefault(entry['turnId'], []).append(entry)
+        grouped, processes, summaries = [], {}, {}
+        for turn_id, turn_entries in by_turn.items():
+            main, process, summary = group_turn(turn_entries, turn_meta[turn_id])
+            grouped.extend(main)
+            processes[turn_id], summaries[turn_id] = process, summary
         same_prefix = (prior and prior['stamp'][:2] == fingerprint[:2]
                        and [(e['key'], e['version']) for e in prior['entries']] == [(e['key'], e['version']) for e in entries[:len(prior['entries'])]])
         epoch = prior['epoch'] if same_prefix else uuid.uuid4().hex
         sequence = prior['sequence'] + 1 if prior else 1
         versions = OrderedDict(prior['versions']) if same_prefix else OrderedDict()
+        group_versions = OrderedDict(prior['groupVersions']) if same_prefix else OrderedDict()
         versions[sequence] = len(entries)
+        group_versions[sequence] = {row['key']: hashlib.sha256(encoded(row)).digest() for row in grouped}
         while len(versions) > 16:
             versions.popitem(last=False)
+            group_versions.popitem(last=False)
         warnings = []
         if malformed:
             warnings.append(f'{malformed} 条损坏记录已跳过；其他内容仍可读取。')
@@ -224,7 +254,9 @@ class LogReader:
             warnings.append('日志末尾正在写入，未完成的记录会在下一次读取时重试。')
         if not entries:
             warnings.append('日志暂未包含可识别的对话消息，可能只有元信息或使用了不支持的格式。')
-        return {'stamp': fingerprint, 'entries': entries, 'positions': {e['key']: i for i, e in enumerate(entries)}, 'usage': usage, 'context': context, 'usageParts': list(usage_parts.values()), 'model': current_model,
+        return {'stamp': fingerprint, 'entries': entries, 'positions': {e['key']: i for i, e in enumerate(entries)},
+                'groupRows': grouped, 'processes': processes, 'summaries': summaries, 'groupVersions': group_versions,
+                'usage': usage, 'context': context, 'usageParts': list(usage_parts.values()), 'model': current_model,
                 'epoch': epoch, 'sequence': sequence, 'versions': versions, 'warnings': warnings, 'id': key}
 
     def _text(self, entry, stream):
@@ -285,6 +317,26 @@ class LogReader:
             end = min(offset + DETAIL, len(text))
             return {'key': entry['key'], 'version': entry['version'], 'text': text[offset:end], 'offset': offset,
                     'next': end if end < len(text) else None, 'files': []}
+        if mode == 'process':
+            turn_id = options.get('turnId')
+            if turn_id not in index['processes']:
+                raise HistoryUnavailable('这轮任务的过程记录已更新，请刷新聊天')
+            offset = max(0, int(options.get('offset', 0)))
+            limit = max(1, min(100, int(options.get('limit', 40))))
+            rows, size = [], 0
+            process = index['processes'][turn_id]
+            for entry in process[offset:offset + limit]:
+                row = self._row(entry, stream)
+                cost = len(encoded(row))
+                if rows and size + cost > PAGE_BYTES:
+                    break
+                rows.append(row)
+                size += cost
+            end = offset + len(rows)
+            return dict(epoch=epoch, turnId=turn_id, summaryVersion=index['summaries'][turn_id]['version'],
+                        rows=rows, next=end if end < len(process) else None, hasMore=end < len(process), files=[])
+        if options.get('grouped'):
+            return self._group_result(index, stream, mode, options, base)
         if mode == 'changes':
             after = int(options.get('after', -1))
             if options.get('epoch') == epoch and after in index['versions']:
@@ -310,3 +362,41 @@ class LogReader:
         rows.reverse()
         return dict(base, rows=rows, before=epoch + '.' + rows[0]['key'] if rows else None,
                     hasMore=end - len(rows) > 0, total=len(entries))
+
+    def _group_result(self, index, stream, mode, options, base):
+        entries, epoch = index['groupRows'], index['epoch']
+        positions = {row['key']: i for i, row in enumerate(entries)}
+        def position(cursor):
+            prefix, _, key = (cursor or '').partition('.')
+            return positions.get(key) if prefix == epoch else None
+        def row(entry):
+            return entry if entry.get('kind') == 'turnSummary' else self._row(entry, stream)
+        if mode == 'changes':
+            after, start = int(options.get('after', -1)), options.get('start')
+            first = position(start) if start else 0
+            if options.get('epoch') == epoch and after in index['groupVersions'] and first is not None:
+                previous, current = index['groupVersions'][after], index['groupVersions'][index['sequence']]
+                changed = [row(entry) for entry in entries[first:] if previous.get(entry['key']) != current[entry['key']]]
+                if len(changed) <= 300 and sum(len(encoded(r)) for r in changed) <= PAGE_BYTES:
+                    return dict(base, rows=changed, removed=[key for key in previous if key not in current])
+            return dict(self._group_result(index, stream, 'page', {}, base), reset=True)
+        before = options.get('before')
+        end = position(before) if before else len(entries)
+        if end is None:
+            return dict(self._group_result(index, stream, 'page', {}, base), reset=True)
+        start, size, count = end, 0, 0
+        groups = []
+        while start > 0 and count < max(1, min(100, int(options.get('limit', 20)))):
+            group_start = start - 1
+            turn_id = entries[group_start]['turnId']
+            while group_start > 0 and entries[group_start - 1]['turnId'] == turn_id:
+                group_start -= 1
+            selected = [row(entry) for entry in entries[group_start:start]]
+            cost = sum(len(encoded(r)) for r in selected)
+            if count and size + cost > PAGE_BYTES:
+                break
+            groups.insert(0, selected)
+            start, size, count = group_start, size + cost, count + 1
+        rows = [r for group in groups for r in group]
+        return dict(base, rows=rows, before=epoch + '.' + rows[0]['key'] if rows else None,
+                    hasMore=start > 0, total=len(entries))

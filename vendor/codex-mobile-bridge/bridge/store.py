@@ -9,6 +9,7 @@ import sqlite3
 import tempfile
 from contextlib import closing, contextmanager, ExitStack
 from pathlib import Path
+from .timeline import timestamp_ms
 
 
 class StoreUnavailable(RuntimeError):
@@ -156,12 +157,14 @@ class SessionStore:
                 continue
             payload = record.get("payload", {})
             if record.get("type") == "event_msg" and payload.get("type") == "task_started":
-                current = {"turnId": payload.get("turn_id"), "status": "inProgress", "items": []}
+                current = {"turnId": payload.get("turn_id"), "status": "inProgress", "items": [],
+                           "turnStartedAtMs": timestamp_ms(record.get('timestamp'))}
                 turns.append(current)
                 items = current["items"]
             elif record.get("type") == "event_msg" and payload.get("type") in ("task_complete", "turn_aborted"):
                 if current:
                     current["status"] = "completed" if payload["type"] == "task_complete" else "interrupted"
+                    current["turnCompletedAtMs"] = timestamp_ms(record.get('timestamp'))
             elif record.get("type") == "response_item":
                 if current is None:
                     current = {"turnId": "history", "status": "completed", "items": []}

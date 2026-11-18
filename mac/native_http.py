@@ -7,7 +7,7 @@ from .history_catalog import HistoryUnavailable
 from .workspace_reader import WorkspaceReader, WorkspaceConflictError
 
 ROOT = '/api/native/v1'
-THREAD = re.compile(r'^/api/native/v1/threads/([0-9a-f-]{36})/(timeline|changes|detail|usage)$')
+THREAD = re.compile(r'^/api/native/v1/threads/([0-9a-f-]{36})/(timeline|changes|detail|process|usage)$')
 WORKSPACE = re.compile(r'^/api/native/v1/threads/([0-9a-f-]{36})/workspace/(tree|search|file|import|repositories|changes|patch)$')
 
 
@@ -88,10 +88,15 @@ def handle(handler, write, path):
             read_only = row.get('readOnly') or explicit_log
             if action == 'detail':
                 mode, options = 'detail', {'cursor': value('key'), 'offset': int(value('offset', '0')), 'version': value('version')}
+            elif action == 'process':
+                mode, options = 'process', {'turnId': value('turn'), 'offset': int(value('offset', '0')),
+                                            'limit': max(1, min(100, int(value('limit', '30'))))}
             elif action == 'changes':
-                mode, options = 'changes', {'after': int(value('after', '-1')), 'epoch': value('epoch'), 'start': value('start')}
+                mode, options = 'changes', {'after': int(value('after', '-1')), 'epoch': value('epoch'), 'start': value('start'),
+                                           'grouped': value('projection') == 'turns'}
             else:
-                mode, options = 'page', {'limit': max(1, min(100, int(value('limit', '30')))), 'before': value('before') or None}
+                mode, options = 'page', {'limit': max(1, min(100, int(value('limit', '20')))), 'before': value('before') or None,
+                                        'grouped': value('projection') == 'turns'}
             if read_only:
                 result = library.timeline(key, mode, **options)
             else:

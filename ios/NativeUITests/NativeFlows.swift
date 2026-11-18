@@ -1,6 +1,46 @@
 import XCTest
 
 final class NativeFlows: XCTestCase {
+    private func processSummary(_ app: XCUIApplication) -> XCUIElement {
+        let transcript = app.descendants(matching: .any).matching(identifier: "native.transcript").firstMatch
+        XCTAssertTrue(transcript.waitForExistence(timeout: 8))
+        let summary = app.buttons["native.turn.process.synthetic-turn"]
+        for _ in 0..<8 {
+            if summary.exists && !summary.frame.isEmpty && summary.frame.intersects(transcript.frame) { break }
+            transcript.swipeDown()
+        }
+        XCTAssertTrue(summary.waitForExistence(timeout: 8))
+        return summary
+    }
+    private func expandProcess(_ app: XCUIApplication) {
+        let summary = processSummary(app)
+        if summary.value as? String == "收起" { summary.tap() }
+    }
+
+    func testTurnProcessDisclosure() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "local.codex.link")
+        for key in ["PORT", "PIN", "ID"] {
+            let name = "LINK_SMOKE_" + key
+            app.launchEnvironment[name] = ProcessInfo.processInfo.environment[name]
+        }
+        app.launchEnvironment["LINK_SMOKE_UI"] = "1"
+        app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        app.launch()
+        let session = app.buttons["native.home.session.00000000-0000-0000-0000-000000000002"]
+        XCTAssertTrue(session.waitForExistence(timeout: 40)); session.tap()
+        let summary = processSummary(app)
+        XCTAssertEqual(summary.value as? String, "收起")
+        XCTAssertTrue(summary.label.contains("用时 1分05秒"))
+        XCTAssertFalse(app.buttons["native.tool.t1"].exists)
+        summary.tap()
+        XCTAssertTrue(app.buttons["native.tool.t1"].waitForExistence(timeout: 8))
+        XCTAssertEqual(summary.value as? String, "展开")
+        summary.tap()
+        XCTAssertFalse(app.buttons["native.tool.t1"].exists)
+        XCTAssertEqual(summary.value as? String, "收起")
+        capture("Turn process disclosure keeps opening and final messages visible")
+    }
     private func openChatMenu(_ app: XCUIApplication) {
         let menu = app.buttons["native.chat.menu"]
         XCTAssertTrue(menu.waitForExistence(timeout: 8))
@@ -207,6 +247,7 @@ final class NativeFlows: XCTestCase {
         app.launch()
         let session = app.buttons["native.home.session.00000000-0000-0000-0000-000000000002"]
         XCTAssertTrue(session.waitForExistence(timeout: 40)); session.tap()
+        expandProcess(app)
         let transcript = app.descendants(matching: .any).matching(identifier: "native.transcript").firstMatch
         let change = app.buttons["native.tool.f1"]
         XCTAssertTrue(change.waitForExistence(timeout: 10))
@@ -398,6 +439,7 @@ final class NativeFlows: XCTestCase {
         app.launch()
         let session = app.buttons["native.home.session.00000000-0000-0000-0000-000000000002"]
         XCTAssertTrue(session.waitForExistence(timeout: 40)); session.tap()
+        expandProcess(app)
         let transcript = app.descendants(matching: .any).matching(identifier: "native.transcript").firstMatch
         let command = app.buttons["native.tool.t1"]
         XCTAssertTrue(command.waitForExistence(timeout: 10))

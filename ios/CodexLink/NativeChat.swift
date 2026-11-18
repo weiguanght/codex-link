@@ -306,9 +306,11 @@ struct NativeChatView: View {
         NativeTranscript(identity: chat.session?.identity ?? "", rows: chat.visibleRows.map { row in
             NativeChatRow(sessionIdentity: chat.session?.identity ?? "", cursor: chat.cursor(for: row), row: row,
                 text: chat.rowText(row), stats: chat.fileChangeStats(row), readOnly: chat.readOnly, hasMore: chat.rowHasMore(row),
+                processState: chat.processState(row), insideProcess: chat.insideProcess(row),
                 onTool: { focused = false; toolDetail = row }, onAttachment: { openAttachment($0) }, onCopy: { NativeClipboard.copy($0) },
                 onExpand: { perform { try await chat.expand(row) } }, onMessageAction: { messageAction = row },
-                onLoadStats: { await chat.loadFileChangeStats(row) })
+                onLoadStats: { await chat.loadFileChangeStats(row) }, onToggleProcess: { chat.toggleProcess(row) },
+                onLoadProcess: { await chat.loadProcess(row, more: chat.processState(row)?.hasMore == true) })
         }, footer: AnyView(transcriptFooter),
             footerState: NativeTranscriptFooterState(meta: chat.meta, files: chat.files, loading: chat.loading,
                 readOnly: chat.readOnly, pollingError: chat.pollingError, error: chat.error, notice: chat.notice,

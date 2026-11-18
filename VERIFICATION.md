@@ -1,5 +1,14 @@
 # 验证记录
 
+## 任务过程分组与按需读取（2026-11-18）
+
+- iOS 按轮次显示用户发起消息、耗时摘要和最终回答；中途模型／用户消息、工具调用与文件变更收进过程区块。运行中默认展开，完成后默认收起，展开时分页读取过程。过程行继续由 UIKit 复用，开合与插入保留阅读锚点。
+- 原生时间线通过 `projection=turns` 启用分组，受认证的 `process` 接口按轮次分页；原有网页时间线、全文 Markdown 复制及消息详情仍读取原始记录。历史索引保留明确的 turn ID，按内容去除事件镜像，保留同轮的补充输入；耗时保留日志开始／结束时间，桌面快照缺少时可复用已载入历史的时间字段。
+- 全量 Python **157 项通过**（`build/turn-process-python.log`）；随后新增运行中结束计时回归，最终耗时补全与桌面流相关回归 **15 项通过**（`build/turn-process-final-regressions.log`）。覆盖首尾投影、活跃过程更新、整轮分页、过程字节上限、展开详情、懒读取、补充消息、认证与只读边界。
+- 原生 smoke **25 项通过**（`build/ios-smoke-result.json`），含完成轮次不预取过程、懒加载工具详情／差异统计、中途模型与用户消息归组、运行中自动展开和完成后自动收起。开合 UI 测试 **1 项通过**（`build/native-ui-20261118-173926.xcresult`）；本轮未跑完整 UI 套件。
+- arm64 Release、IPA 归档和 TrollStore 签名检查通过；构建日志 `build/turn-process-build.log`，最新包 `build/codex-link-0.1.0-TrollStore.ipa`，校验 `build/SHA256SUMS.txt`。
+- 安装新版 IPA 并重启 Mac 网关后生效；不需重新配对。
+
 ## 自动命名会话创建失败（2026-11-18）
 
 - 复现为桌面运行时 `codex-cli 0.169.0-alpha.11.1` 创建留空名称的 paginated 会话后，`thread/read(includeTurns: true)` 报 `list_turns is not supported yet`。新会话及 rollout 已创建，但旧流程把后续读取错误当作创建失败，未将会话交给桌面 App。

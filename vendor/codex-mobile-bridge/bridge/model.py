@@ -148,12 +148,14 @@ def normalize_state(state, connected=True):
                 calls[item['call_id']]['output'] = output if isinstance(output, str) else json.dumps(output, ensure_ascii=False)
             else:
                 messages.append(normalize_item(item))
-        if not any(x.get("role") == "user" for x in messages):
+        if not any(x.get("role") == "user" and x.get('kind') != 'steeringUserMessage' for x in messages):
             opening = text_content(turn.get("params", {}).get("input", []))
             if opening:
                 messages.insert(0, {"id": "opening-" + str(turn.get("turnId", ordinal)), "role": "user", "kind": "userMessage", "text": opening})
         result.append({"id": turn.get("turnId") or str(ordinal), "status": turn.get("status"),
-                       "startedAt": turn.get("turnStartedAtMs"), "messages": messages,
+                       "startedAt": turn.get("turnStartedAtMs") or turn.get("startedAtMs"),
+                       "endedAt": turn.get("turnCompletedAtMs") or turn.get("turnEndedAtMs") or turn.get("completedAtMs"),
+                       "durationMs": turn.get("durationMs"), "messages": messages,
                        "actionable": bool(turn.get("turnId")) and turn.get("turnId") != "history",
                        "error": turn.get("error"), "diff": turn.get("diff")})
     history = state.get("turnHistory", {}).get("history", {})
