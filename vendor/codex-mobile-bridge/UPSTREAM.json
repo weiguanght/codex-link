@@ -33,7 +33,7 @@
     "transport",
     "uploads"
   ],
-  "modifications": "codex-link extends bridge/create.py, bridge/httpd.py and bridge/service.py to create conversations without a selected project and pass validated model, reasoning and permission overrides to thread/start. Other runtime files are unchanged; Electron, old launchers, deployment and updater are excluded.",
+  "modifications": "codex-link extends bridge/create.py, bridge/httpd.py and bridge/service.py to create conversations without a selected project, pass validated model, reasoning and permission overrides to thread/start, and hand off unnamed paginated threads when list_turns is unavailable. Other runtime files are unchanged; Electron, old launchers, deployment and updater are excluded.",
   "files": {
     "LICENSE": "c570fcd5f3e188c401eabd5c615e13a717048deb103a79fae32ea93635307067",
     "bridge/__init__.py": "1dc0c4388910d4edc4abfb4482779efce62d8a1a35dab0bf71c66a400c21ddfa",
@@ -43,7 +43,7 @@
     "bridge/accounts.py": "05aa9864da3d731d759f9f30cf1e5d3e1acd0b2c075dbe5f6559fa1ca44f1220",
     "bridge/auth.py": "f239b9610ed998c5f8f246be67927da60b24cb84793ea1df17e428500f1f470e",
     "bridge/catalog.py": "3e981764d0ab4860251baf104d31d3b1d1ad99c86228b6540c2d12755fd0c8ec",
-    "bridge/create.py": "a489c325b4129d3462a1f135cf57b1c86d8ef78a73cfb4b685afc2aad163508c",
+    "bridge/create.py": "432fa55904b1f996f266841fa55ec7be93d7bdad1ee86b90edaf9a704704e39d",
     "bridge/desktop_app.py": "72db6c27864752afc8979c6ea2e0ffbb0192dd818d4cf74f0fdc0e9691297a70",
     "bridge/files.py": "7ab25576e469a83961fdf684549349e5903bbab5f0c5c7ef2d57ab8825db422a",
     "bridge/goal.py": "4c104198876727211317154fa37fd6074cf3ae9ac4149e38b0401b58d7ebc893",

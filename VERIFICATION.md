@@ -1,5 +1,13 @@
 # 验证记录
 
+## 自动命名会话创建失败（2026-11-18）
+
+- 复现为桌面运行时 `codex-cli 0.169.0-alpha.11.1` 创建留空名称的 paginated 会话后，`thread/read(includeTurns: true)` 报 `list_turns is not supported yet`。新会话及 rollout 已创建，但旧流程把后续读取错误当作创建失败，未将会话交给桌面 App。
+- 仅对该精确的 `list_turns` 未实现错误回退至 `thread/read(includeTurns: false)`；其他读取错误仍原样报出。该读取确认会话元数据，不启动 turn。自定义名称流程不变。
+- 新增 3 项回归：fallback 成功、无关错误不被吞掉、fallback 元数据读取失败时继续报错。全量 Python **148 项通过**（`build/create-chat-tests.log`）。
+- 使用本机 `0.169.0-alpha.11.1`，在隔离 HOME 和离线 provider 下验证留空／自定义名称的新建：rollout 写入、桌面 `thread/resume` 恢复同一空会话、名称正确；未触发模型轮次。记录：`build/create-chat-runtime-check.json`。
+- 此修复位于 Mac 网关；需重启 Mac 网关后生效。iOS 安装包不含此 Python 修复。
+
 ## 新建会话、发送方式与用户消息复制（2026-11-18）
 
 - 新建会话支持自定义名称，留空时保留 Codex 自动命名；可不选择项目直接创建。本机会话支持模型、推理强度、审批策略和沙盒选择，参数传入 `thread/start`。

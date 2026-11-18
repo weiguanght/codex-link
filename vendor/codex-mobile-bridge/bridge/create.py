@@ -115,7 +115,15 @@ def create_empty(executable, codex_home, cwd, title, settings=None):
         uuid.UUID(thread_id)
         if title:
             request('thread/name/set', {'threadId': thread_id, 'name': title})
-        request('thread/read', {'threadId': thread_id, 'includeTurns': True})
+        try:
+            # Materialize the empty rollout before the desktop takes over.
+            request('thread/read', {'threadId': thread_id, 'includeTurns': True})
+        except CreationError as exc:
+            # 0.169 materializes unnamed paginated threads before their SQLite
+            # metadata exists, then fails while listing their (empty) turns.
+            if str(exc) != 'list_turns is not supported yet':
+                raise
+            request('thread/read', {'threadId': thread_id, 'includeTurns': False})
         return thread_id
     return _runtime_operation(executable, codex_home, cwd, create)
 
