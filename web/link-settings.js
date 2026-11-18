@@ -14,13 +14,46 @@
   };
   const endpoint = '/api/codex-settings';
   let active = null;
-  const labels = {
-    model: ['默认模型', 'Default model'], model_reasoning_effort: ['推理强度', 'Reasoning effort'],
-    model_reasoning_summary: ['推理摘要', 'Reasoning summary'], model_verbosity: ['回答详略', 'Response verbosity'],
-    web_search: ['联网搜索', 'Web search'], approval_policy: ['审批策略', 'Approval policy'],
-    sandbox_mode: ['执行沙盒', 'Execution sandbox'], developer_instructions: ['开发者指令', 'Developer instructions'],
-  };
+  const sections = [
+    ['模型与推理', 'Models & reasoning', {
+      model: ['默认模型', 'Default model'], review_model: ['代码审查模型', 'Review model'], service_tier: ['服务档位', 'Service tier'],
+      model_reasoning_effort: ['推理强度', 'Reasoning effort'], plan_mode_reasoning_effort: ['计划模式推理强度', 'Plan mode reasoning effort'],
+      model_reasoning_summary: ['推理摘要', 'Reasoning summary'], model_verbosity: ['回答详略', 'Response verbosity'],
+      personality: ['交流风格', 'Personality'], model_context_window: ['上下文窗口（Token）', 'Context window (tokens)'],
+      model_auto_compact_token_limit: ['自动压缩阈值（Token）', 'Auto-compaction limit (tokens)'],
+      model_auto_compact_token_limit_scope: ['自动压缩范围', 'Auto-compaction scope'],
+      model_post_turn_compact_threshold_percent: ['回合结束压缩阈值（%）', 'End-of-turn compaction threshold (%)'],
+    }],
+    ['权限与沙盒', 'Permissions & sandbox', {
+      approval_policy: ['审批策略', 'Approval policy'], approvals_reviewer: ['由谁审核', 'Approvals reviewer'],
+      sandbox_mode: ['执行沙盒', 'Execution sandbox'], allow_login_shell: ['允许使用登录 Shell', 'Allow login shell'],
+    }],
+    ['指令与记忆', 'Instructions & memory', {
+      developer_instructions: ['开发者指令', 'Developer instructions'], compact_prompt: ['上下文压缩指令', 'Compaction prompt'],
+      project_doc_max_bytes: ['项目指令读取上限（字节）', 'Project instructions limit (bytes)'],
+      include_environment_context: ['注入工作环境', 'Include working environment'],
+      include_environment_context_time: ['注入当前日期与时区', 'Include date and time zone'],
+      include_apps_instructions: ['注入应用指令', 'Include app instructions'],
+      include_collaboration_mode_instructions: ['注入协作模式指令', 'Include collaboration mode instructions'],
+      'features.memories': ['启用记忆', 'Enable memory'], 'memories.generate_memories': ['生成记忆', 'Generate memories'],
+      'memories.use_memories': ['使用记忆', 'Use memories'],
+      'memories.disable_on_external_context': ['使用外部上下文时停用记忆', 'Disable memory with external context'],
+    }],
+    ['工具与终端', 'Tools & terminal', {
+      web_search: ['联网搜索', 'Web search'], tool_output_token_limit: ['工具输出上限（Token）', 'Tool output limit (tokens)'],
+      background_terminal_max_timeout: ['后台终端等待上限（毫秒）', 'Background terminal polling limit (ms)'],
+    }],
+    ['CLI 输入历史', 'CLI input history', {
+      'history.persistence': ['保存方式', 'Persistence'], 'history.max_bytes': ['历史文件上限（字节）', 'Max history size (bytes)'],
+    }],
+  ];
+  const labels = Object.assign({}, ...sections.map(([, , fields]) => fields));
+  const fieldValue = field => field.effective ?? field.value;
   const optionLabels = {
+    true: ['开启', 'On'], false: ['关闭', 'Off'], none: ['无', 'None'], 'save-all': ['全部保存', 'Save all'],
+    default: ['标准', 'Standard'], fast: ['快速', 'Fast'], priority: ['快速', 'Fast'], flex: ['灵活', 'Flex'],
+    user: ['用户', 'User'], auto_review: ['自动审核', 'Auto review'], guardian_subagent: ['审核子代理', 'Review subagent'],
+    total: ['完整上下文', 'Entire context'], body_after_prefix: ['仅计算前缀后的内容', 'Content after prefix'],
     disabled: ['关闭', 'Off'], cached: ['缓存搜索', 'Cached search'], live: ['实时搜索', 'Live search'],
     'read-only': ['只读', 'Read only'], 'workspace-write': ['允许写工作区', 'Workspace write'],
     'danger-full-access': ['完全访问（高风险）', 'Full access (high risk)'],
@@ -36,10 +69,6 @@
       d.addEventListener('close', () => { d.remove(); resolve(accepted); }, {once: true});
       document.body.append(d); d.showModal();
     });
-  }
-  function source(value) {
-    if (!value?.type) return words('运行时默认', 'Runtime default');
-    return [value.type, value.profile, value.file || value.dotCodexFolder].filter(Boolean).join(' · ');
   }
   function open(initialScope = '') {
     if (active) { active.focus(); return; }
@@ -76,12 +105,19 @@
       const result = {};
       if (!data || data.scope.key) return result;
       for (const [key, control] of controls) {
-        const value = control.value === '' ? null : control.value;
-        if (data.fields[key].editable && value !== data.fields[key].value) result[key] = value;
+        const field = data.fields[key];
+        if (!field.editable || control.value === String(fieldValue(field) ?? '')) continue;
+        let value = control.value === '' ? null : control.value;
+        if (value !== null && field.kind === 'boolean') value = value === 'true';
+        if (value !== null && field.kind === 'integer') value = control.valueAsNumber;
+        result[key] = value;
       }
       return result;
     }
-    function sync() { save.disabled = busy || stale || !data?.writable || !Object.keys(changes()).length; }
+    function sync() {
+      save.disabled = busy || stale || !data?.writable || !Object.keys(changes()).length
+        || [...controls.values()].some(control => !control.validity.valid);
+    }
     async function discard() {
       return !Object.keys(changes()).length || await confirm(words('放弃未保存的更改？', 'Discard unsaved changes?'),
         words('当前草稿尚未写入 Mac。', 'This draft has not been saved to your Mac.'), words('放弃更改', 'Discard'));
@@ -101,45 +137,42 @@
       const panel = panels.config; panel.replaceChildren(); controls.clear();
       panel.append(node('p', 'settings-note', data.notice));
       if (data.reason) panel.append(node('p', 'settings-readonly', data.reason));
-      const sections = [
-        [words('模型与推理', 'Model & reasoning'), ['model', 'model_reasoning_effort', 'model_reasoning_summary', 'model_verbosity']],
-        [words('搜索与执行权限', 'Search & execution permissions'), ['web_search', 'approval_policy', 'sandbox_mode']],
-        [words('指令', 'Instructions'), ['developer_instructions']],
-      ];
-      for (const [heading, keys] of sections) {
-        const group = node('fieldset', 'settings-group'); group.append(node('legend', '', heading));
-        for (const key of keys) {
-          const field = data.fields[key]; if (!field) continue;
+      for (const [zh, en, fields] of sections) {
+        const group = node('fieldset', 'settings-group'); group.append(node('legend', '', words(zh, en)));
+        for (const [key, title] of Object.entries(fields)) {
+          const field = data.fields[key];
+          if (!field || field.supported === false) continue;
           const row = node('div', 'settings-field');
-          const label = node('label', '', words(...labels[key])); label.htmlFor = 'setting-' + key;
+          const label = node('label', 'settings-field-head', words(...title)); label.htmlFor = 'setting-' + key;
           let input;
-          if (field.kind === 'choice') {
-            input = node('select'); input.append(new Option(words('继承 / 运行时默认', 'Inherit / runtime default'), ''));
-            for (const value of field.choices) input.append(new Option(optionLabels[value] ? words(...optionLabels[value]) : value, value));
-            const value = data.scope.key ? field.effective : field.value;
-            if (value && !field.choices.includes(value)) input.append(new Option(value, value));
+          if (field.kind === 'choice' || field.kind === 'boolean') {
+            const choices = field.kind === 'boolean' ? ['true', 'false'] : field.choices;
+            input = node('select'); input.append(new Option(words('默认', 'Default'), ''));
+            for (const value of choices) input.append(new Option(optionLabels[value] ? words(...optionLabels[value]) : value, value));
+            const value = fieldValue(field);
+            if (value !== null && !choices.includes(String(value))) input.append(new Option(String(value), String(value)));
           } else {
             input = node(field.kind === 'multiline' ? 'textarea' : 'input');
-            input.placeholder = words('留空则继承默认值', 'Leave empty to inherit');
-            if (key === 'model') { input.setAttribute('list', 'codex-settings-models'); input.autocapitalize = 'none'; input.spellcheck = false; input.maxLength = 200; }
-            else if (key === 'model_reasoning_effort') { input.setAttribute('list', 'codex-settings-efforts'); input.maxLength = 80; }
-            else { input.rows = 5; input.maxLength = 32768; }
+            input.placeholder = words('默认', 'Default');
+            if (field.kind === 'integer') {
+              input.type = 'number'; input.step = '1'; input.min = field.minimum; input.max = field.maximum;
+            } else if (field.kind === 'multiline') {
+              input.rows = 4; input.maxLength = 32768;
+            } else {
+              input.autocapitalize = 'none'; input.spellcheck = false;
+              input.maxLength = key.endsWith('_effort') ? 80 : 200;
+              if (key === 'model' || key === 'review_model') input.setAttribute('list', 'codex-settings-models');
+              if (key.endsWith('_effort')) input.setAttribute('list', 'codex-settings-efforts');
+            }
           }
-          input.id = 'setting-' + key; input.value = (data.scope.key ? field.effective : field.value) ?? '';
+          input.id = 'setting-' + key; input.value = fieldValue(field) ?? '';
           input.disabled = !field.editable; input.addEventListener('input', sync); input.addEventListener('change', sync); controls.set(key, input);
-          const reset = button(words('继承', 'Inherit'), () => { input.value = ''; sync(); }, 'plain settings-reset'); reset.disabled = !field.editable;
-          const headingRow = node('div', 'settings-field-head'); headingRow.append(label, reset); row.append(headingRow, input);
-          const details = node('details', 'settings-effective');
-          details.append(node('summary', '', words('生效值与来源', 'Effective value & source')),
-            node('pre', '', field.structured ? words('高级结构化设置（请在 Mac 管理）', 'Structured setting (manage on Mac)') : field.effective ?? words('运行时默认', 'Runtime default')),
-            node('p', '', source(field.origin)));
-          row.append(details);
+          row.append(label, input);
           if (field.reason && field.reason !== data.reason) row.append(node('p', 'settings-note', field.reason));
-          if (key === 'model_reasoning_effort' && field.kind === 'text') row.append(node('p', 'settings-note', words('由模型决定。可读取模型目录获取建议，或输入供应商支持的强度 ID。', 'Model-dependent. Load the catalog for suggestions, or enter a provider-supported effort ID.')));
           group.append(row);
         }
-        panel.append(group);
-        if (keys.includes('model')) {
+        if (group.children.length > 1) panel.append(group);
+        if (controls.has('model') && Object.hasOwn(fields, 'model')) {
           const list = node('datalist'); list.id = 'codex-settings-models'; panel.append(list);
           const efforts = node('datalist'); efforts.id = 'codex-settings-efforts'; panel.append(efforts);
           const models = button(words('读取可用模型', 'Load available models'), () => run(async () => {
@@ -147,18 +180,16 @@
             const result = await api(endpoint + '/models'); list.replaceChildren();
             for (const row of result.models) list.append(new Option(row.name, row.id));
             function suggestEfforts() {
-              const chosen = controls.get('model').value || data.fields.model.effective;
-              efforts.replaceChildren(...(result.models.find(m => m.id === chosen)?.efforts || []).map(value => new Option(value, value)));
+              const chosen = controls.get('model').value;
+              const model = result.models.find(m => chosen ? m.id === chosen : m.isDefault);
+              efforts.replaceChildren(...(model?.efforts || []).map(value => new Option(value, value)));
             }
             controls.get('model').addEventListener('input', suggestEfforts); suggestEfforts();
             status.textContent = result.notice + ' (' + result.models.length + (result.hasMore ? '+' : '') + ')';
           })); models.disabled = !data.capabilities.models; models.id = 'codex-settings-load-models'; panel.append(models);
         }
       }
-      const layers = node('details', 'settings-effective'); layers.append(node('summary', '', words('配置层与运行时', 'Layers & runtime')));
-      layers.append(node('p', '', data.runtimeVersion), node('p', '', 'Provider: ' + (data.provider || 'default')));
-      for (const layer of data.layers) layers.append(node('p', '', source(layer) + (layer.disabled ? words('（已禁用）', ' (disabled)') : '')));
-      panel.append(layers); sync();
+      sync();
     }
     async function read(key) {
       status.textContent = words('正在读取 Mac 配置…', 'Reading Mac configuration…');
@@ -177,15 +208,15 @@
     };
     async function submit() {
       const dirty = changes(); if (!Object.keys(dirty).length || stale) return;
-      const permission = ['approval_policy', 'sandbox_mode'].filter(key => key in dirty);
+      const permission = Object.keys(dirty).filter(key => data.fields[key].confirm || ['approval_policy', 'sandbox_mode'].includes(key));
       if (permission.length && !await confirm(words('确认执行权限变更', 'Confirm permission changes'),
-        permission.map(key => words(...labels[key]) + ': ' + (dirty[key] ?? words('继承', 'Inherit'))).join('\n') + '\n' +
+        permission.map(key => words(...labels[key]) + ': ' + (dirty[key] ?? words('默认', 'Default'))).join('\n') + '\n' +
         words('影响后续会话。完全访问或从不审批可能允许 Codex 无提示地修改文件、运行命令。', 'Affects future sessions. Full access or no approvals may allow file changes and commands without prompting.'), words('确认并保存', 'Confirm & save'))) return;
       status.textContent = words('正在保存并回读…', 'Saving and verifying…');
       try {
         const result = await api(endpoint, {scope: data.scope.key, revision: data.revision, changes: dirty, confirmPermissions: permission.length > 0});
         data = result.settings; render();
-        status.textContent = result.status === 'saved_overridden' ? words('已保存，但有更高优先级配置覆盖；请检查生效值。', 'Saved, but higher-priority configuration overrides these values.') : words('已保存并回读确认；未热更新当前会话。', 'Saved and verified. The current conversation was not changed.');
+        status.textContent = result.status === 'saved_overridden' ? words('已保存。部分值受 Mac 配置或策略限制，页面显示当前生效值。', 'Saved. The page shows the values currently applied by your Mac configuration and policies.') : words('已保存并回读确认；未热更新当前会话。', 'Saved and verified. The current conversation was not changed.');
       } catch (e) { stale = true; status.textContent = words('草稿已保留。请重新读取确认 Mac 上的实际值后再保存。', 'Draft retained. Reload to verify the Mac configuration before saving again.'); throw e; }
     }
     function showTab(key) {

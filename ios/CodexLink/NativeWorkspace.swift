@@ -30,7 +30,7 @@ struct NativeLibraryView: View {
         .refreshable { await model.load() }
         .sheet(isPresented: $newProject) { NativeProjectForm(model: model, initial: nil) }
         .sheet(item: $renameProject) { NativeProjectForm(model: model, initial: $0) }
-        .sheet(item: $projectSettings) { project in NavigationStack { NativeCodexSettings(api: model.api, workspace: model, initialScope: project.key) } }
+        .sheet(item: $projectSettings) { project in NavigationStack { NativeCodexSettings(api: model.api, initialScope: project.key) } }
         .sheet(isPresented: $showAgents) { NavigationStack { NativeTextDocument(title: "AGENTS.md", text: agents).toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { showAgents = false } } } } }
         .sheet(item: $rename) { NativeSessionRename(model: model, row: $0) }
         .confirmationDialog("确认修改归档状态？", isPresented: Binding(get: { archive != nil }, set: { if !$0 { archive = nil } }), titleVisibility: .visible) {

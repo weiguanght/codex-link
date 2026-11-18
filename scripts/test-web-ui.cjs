@@ -47,12 +47,14 @@ const engine = process.env.UI_BROWSER === 'webkit' ? webkit : chromium;
     let largeList = false, failSend = false, historyGate = null;
     const registeredProjects = [{key: 'local|codex-link', name: 'codex-link', cwd: '/sample/codex-link', host: 'local', hostLabel: '此电脑', registered: true}];
     let settingsVersion = 1, settingsConflict = false, skillEnabled = true, settingsReads = 0;
-    const configValues = {model: 'gpt-5.4', model_reasoning_effort: 'high'};
+    const configValues = {model: 'gpt-5.4', model_reasoning_effort: 'high', include_environment_context: true};
     function settingsFixture(scope = '') {
       const choices = {model_reasoning_summary: ['auto', 'concise', 'none'], model_verbosity: ['low', 'medium', 'high'], web_search: ['disabled', 'cached', 'live'], approval_policy: ['untrusted', 'on-request', 'never'], sandbox_mode: ['read-only', 'workspace-write', 'danger-full-access']};
-      const keys = ['model', 'model_reasoning_effort', ...Object.keys(choices), 'developer_instructions'];
+      const types = {developer_instructions: 'multiline', model_context_window: 'integer', include_environment_context: 'boolean'};
+      const keys = ['model', 'model_reasoning_effort', ...Object.keys(choices), ...Object.keys(types)];
       return {scope: {key: scope, name: scope ? 'codex-link' : 'Global defaults'}, revision: 'config-' + settingsVersion,
-        fields: Object.fromEntries(keys.map(key => [key, {kind: choices[key] ? 'choice' : key === 'developer_instructions' ? 'multiline' : 'text', value: configValues[key] ?? null,
+        fields: Object.fromEntries(keys.map(key => [key, {kind: choices[key] ? 'choice' : types[key] || 'text', value: configValues[key] ?? null,
+          minimum: 1, maximum: 9007199254740991,
           effective: configValues[key] ?? null, choices: choices[key] || [], editable: !scope, reason: '', origin: {type: 'user', file: '/sample/.codex/config.toml'}}])),
         writable: !scope, reason: scope ? '项目有效配置只读：原生接口不允许写项目配置。' : '', runtimeVersion: 'synthetic runtime', provider: 'sample',
         layers: [{type: 'user', file: '/sample/.codex/config.toml'}], capabilities: {models: true, skills: true, skillWrite: true, mcp: true}, notice: '保存后续会话的默认行为，不接管当前任务。'};
@@ -620,11 +622,21 @@ const engine = process.env.UI_BROWSER === 'webkit' ? webkit : chromium;
     await page.locator('.settings-appearance-entry').click();
     await page.waitForSelector('#setting-model');
     const settings = page.locator('#codex-settings-dialog');
+    assert.equal(await settings.getByText('生效值与来源', {exact: true}).count(), 0);
+    assert.equal(await settings.getByText('配置层与运行时', {exact: true}).count(), 0);
     await screenshot('settings-defaults-zh');
     await page.fill('#setting-model_reasoning_effort', 'medium');
     await page.click('#codex-settings-save');
     await page.waitForFunction(() => document.getElementById('codex-settings-status').textContent.includes('回读确认'));
     assert.deepEqual(writes.filter(w => w.path === '/api/codex-settings').at(-1).body.changes, {model_reasoning_effort: 'medium'});
+    await page.fill('#setting-model_context_window', '0');
+    assert.equal(await page.isDisabled('#codex-settings-save'), true);
+    await page.fill('#setting-model_context_window', '128000');
+    await page.selectOption('#setting-include_environment_context', 'false');
+    await page.click('#codex-settings-save');
+    await page.waitForFunction(() => document.getElementById('codex-settings-status').textContent.includes('回读确认'));
+    assert.deepEqual(writes.filter(w => w.path === '/api/codex-settings').at(-1).body.changes,
+      {model_context_window: 128000, include_environment_context: false});
     await page.click('#codex-settings-load-models');
     await page.waitForSelector('#codex-settings-models option', {state: 'attached'});
     assert.equal(await page.locator('#codex-settings-efforts option').count(), 3);

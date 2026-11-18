@@ -88,7 +88,7 @@ struct NativeChatView: View {
         #endif
         .toolbar { navigationControls }
         .sheet(isPresented: $threadSettings) { NativeThreadSettings(chat: chat) }
-        .sheet(isPresented: $permissionSettings) { NavigationStack { NativeCodexSettings(api: chat.api, workspace: workspace, initialScope: "", permissionsOnly: true) } }
+        .sheet(isPresented: $permissionSettings) { NavigationStack { NativeCodexSettings(api: chat.api, category: .permissions) } }
         .sheet(isPresented: $sendSettings) { NativeSendSettings(draft: chat.composer) }
         .sheet(isPresented: $chooseSendMode) { sendModeChooser }
         .onChange(of: chat.running) { if !$0 { chooseSendMode = false } }

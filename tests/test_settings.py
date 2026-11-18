@@ -17,8 +17,14 @@ class FakeSchema:
     def __init__(self):
         choices = {'model_reasoning_effort': ['low', 'medium', 'high'], 'model_reasoning_summary': ['auto', 'concise', 'detailed', 'none'],
                    'model_verbosity': ['low', 'medium', 'high'], 'web_search': ['disabled', 'cached', 'live'],
-                   'approval_policy': ['untrusted', 'on-request', 'never'], 'sandbox_mode': ['read-only', 'workspace-write', 'danger-full-access']}
-        props = {key: {'enum': choices[key]} if key in choices else {'type': ['string', 'null']} for key in FIELDS}
+                   'approval_policy': ['untrusted', 'on-request', 'never'], 'sandbox_mode': ['read-only', 'workspace-write', 'danger-full-access'],
+                   'approvals_reviewer': ['user', 'auto_review']}
+        props = {}
+        for key, kind in FIELDS.items():
+            if '.' in key:
+                continue
+            props[key] = {'enum': choices[key]} if key in choices else {
+                'type': [{'integer': 'integer', 'boolean': 'boolean'}.get(kind, 'string'), 'null']}
         self.value = {'methods': set(METHODS), 'version': 'synthetic-only', 'files': {
             'ConfigReadResponse': {'definitions': {'Config': {'properties': props}}},
             'ConfigBatchWriteParams': {'properties': {k: {} for k in ('edits', 'expectedVersion', 'reloadUserConfig')}},
@@ -45,7 +51,8 @@ class FakeRuntime:
         self.calls.append((method, copy.deepcopy(params)))
         if method == 'config/read':
             if self.written and self.fail_readback: raise SettingsError('synthetic failure')
-            effective = {**self.local, **self.extra, **self.overrides}
+            effective = {'memories': None, 'features': {'memories': False}, 'history': {'persistence': 'save-all'},
+                         **self.local, **self.extra, **self.overrides}
             user = {'name': {'type': 'user', 'file': str(self.home / 'config.toml'), 'profile': self.extra.get('profile')}, 'version': digest(self.local), 'config': copy.deepcopy(self.local)}
             layers = [user]
             if params.get('cwd'):
@@ -61,8 +68,12 @@ class FakeRuntime:
             if not self.ignore_write:
                 for e in params['edits']:
                     assert e['mergeStrategy'] == 'replace'
-                    if e['value'] is None: self.local.pop(e['keyPath'], None)
-                    else: self.local[e['keyPath']] = e['value']
+                    keys = e['keyPath'].split('.')
+                    table = self.local
+                    for key in keys[:-1]:
+                        table = table.setdefault(key, {})
+                    if e['value'] is None: table.pop(keys[-1], None)
+                    else: table[keys[-1]] = e['value']
             return {'status': 'okOverridden' if self.overrides else 'ok', 'filePath': str(self.home / 'config.toml'), 'version': digest(self.local), 'overriddenMetadata': {'secret': 'SYNTHETIC_SECRET'}}
         if method == 'model/list': return {'data': [{'id': 'internal', 'model': 'test-model', 'displayName': 'Test model', 'isDefault': True, 'token': 'SYNTHETIC_SECRET'}], 'nextCursor': None}
         if method == 'skills/list': return {'data': [{'cwd': params['cwds'][0], 'skills': [{'path': str(self.home / 'skills/demo/SKILL.md'), 'name': 'Demo', 'enabled': self.skill_enabled, 'scope': 'user', 'description': 'A demo', 'env': 'SYNTHETIC_SECRET'}]}]}
@@ -113,6 +124,36 @@ class SettingsTests(unittest.TestCase):
         out = self.save(model=None); self.assertEqual(out['status'], 'saved'); self.assertNotIn('model', self.rpc.local)
         self.rpc.calls.clear(); self.assertEqual(self.save(model=None)['status'], 'unchanged')
         self.assertNotIn('config/batchWrite', [m for m, _ in self.rpc.calls])
+
+    def test_typed_settings_write_and_reset_preserve_sibling_keys(self):
+        self.rpc.local['memories'] = {'use_memories': True, 'extract_model': 'example'}
+        out = self.save(**{'memories.use_memories': False, 'model_context_window': 100000,
+                           'history.persistence': 'none', 'include_environment_context': False})
+        fields = out['settings']['fields']
+        self.assertIs(fields['memories.use_memories']['effective'], False)
+        self.assertIs(fields['include_environment_context']['value'], False)
+        self.assertEqual(fields['model_context_window']['value'], 100000)
+        self.assertEqual(fields['history.persistence']['effective'], 'none')
+        self.save(**{'memories.use_memories': None})
+        self.assertEqual(self.rpc.local['memories'], {'extract_model': 'example'})
+
+    def test_typed_settings_validation_and_runtime_support(self):
+        for changes in ({'model_context_window': True}, {'model_context_window': 0},
+                        {'model_post_turn_compact_threshold_percent': 101}, {'tool_output_token_limit': 1.5},
+                        {'include_environment_context': 'false'}, {'history.persistence': 'disabled'}):
+            with self.assertRaises(ValueError):
+                self.save(**changes)
+        self.rpc.extra['features'] = {}
+        self.assertFalse(self.service.read()['fields']['features.memories']['supported'])
+        with self.assertRaises(SettingsError):
+            self.save(**{'features.memories': True})
+        with self.assertRaises(ValueError):
+            self.save(allow_login_shell=False)
+        self.rpc.requirements['allowLoginShell'] = False
+        with self.assertRaises(SettingsError):
+            self.service.write({'revision': self.service.read()['revision'], 'changes': {'allow_login_shell': True},
+                                'confirmPermissions': True})
+        self.assertNotIn('config/batchWrite', [method for method, _ in self.rpc.calls])
 
     def test_conflict_preserves_external_changes(self):
         token = self.service.read()['revision']; self.rpc.local['external'] = 42

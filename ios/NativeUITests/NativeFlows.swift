@@ -481,6 +481,7 @@ final class NativeFlows: XCTestCase {
         start.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.5)))
         XCTAssertTrue(app.buttons["native.home.settings"].waitForExistence(timeout: 8))
         app.buttons["native.home.settings"].tap()
+        app.buttons["界面与消息"].tap()
         let wrapping = app.switches["native.settings.commandWrapping"]
         XCTAssertTrue(wrapping.waitForExistence(timeout: 8))
         for _ in 0..<4 { if wrapping.exists && wrapping.frame.maxY < app.frame.maxY - 80 { break }; app.swipeUp() }
@@ -489,6 +490,7 @@ final class NativeFlows: XCTestCase {
         expectation(for: NSPredicate(format: "value == %@", "1"), evaluatedWith: wrapping)
         waitForExpectations(timeout: 8)
         capture("Command wrapping setting")
+        app.navigationBars["界面与消息"].buttons.firstMatch.tap()
         app.buttons["完成"].tap()
     }
 
@@ -634,7 +636,7 @@ final class NativeFlows: XCTestCase {
 
         app.buttons["native.home.settings"].tap()
         capture("Native settings root")
-        app.buttons["默认行为"].tap()
+        app.buttons["模型与推理"].tap()
         let model = app.textFields["native.setting.model"]
         XCTAssertTrue(model.waitForExistence(timeout: 10))
         model.tap(); model.typeText("-draft")

@@ -297,9 +297,16 @@ final class NativeSmoke: ObservableObject {
             try require(rejected, "Read-only history accepted a write")
             checks.append("typed history + server read-only guard")
             let settings = try await api.value("/api/codex-settings")
-            let saved = try await api.value("/api/codex-settings", body: json(["revision": settings["revision"], "changes": json(["model_reasoning_effort": string("high")])]))
+            let saved = try await api.value("/api/codex-settings", body: json([
+                "revision": settings["revision"],
+                "changes": json(["model_reasoning_effort": .string("high"), "model_context_window": .number(128000),
+                                 "memories.use_memories": .bool(false)])
+            ]))
             try require(["saved", "unchanged"].contains(saved["status"].string), "Native synthetic config save failed")
-            checks.append("native settings save + readback + CSRF")
+            let fields = saved["settings"]["fields"]
+            try require(fields["model_context_window"]["effective"] == .number(128000)
+                        && fields["memories.use_memories"]["effective"] == .bool(false), "Typed configuration readback failed")
+            checks.append("native settings typed save + readback + CSRF")
             if let desktop = workspace.sessions.first(where: { $0.readOnly != true }) {
                 let draftDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
                 defer { try? FileManager.default.removeItem(at: draftDirectory) }

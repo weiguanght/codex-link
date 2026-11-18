@@ -15,13 +15,51 @@ import uuid
 from .settings_rpc import SettingsError, SettingsRPC, SettingsSchema, enum_values, allows_string
 
 FIELDS = {
-    'model': 'text', 'model_reasoning_effort': 'choice', 'model_reasoning_summary': 'choice',
-    'model_verbosity': 'choice', 'web_search': 'choice', 'approval_policy': 'choice',
-    'sandbox_mode': 'choice', 'developer_instructions': 'multiline',
+    'model': 'text', 'review_model': 'text',
+    'model_reasoning_effort': 'choice', 'plan_mode_reasoning_effort': 'choice',
+    'model_reasoning_summary': 'choice', 'model_verbosity': 'choice',
+    'personality': 'choice', 'service_tier': 'choice',
+    'model_context_window': 'integer', 'model_auto_compact_token_limit': 'integer',
+    'model_auto_compact_token_limit_scope': 'choice', 'model_post_turn_compact_threshold_percent': 'integer',
+    'approval_policy': 'choice', 'approvals_reviewer': 'choice', 'sandbox_mode': 'choice',
+    'allow_login_shell': 'boolean',
+    'developer_instructions': 'multiline', 'compact_prompt': 'multiline',
+    'project_doc_max_bytes': 'integer', 'include_environment_context': 'boolean',
+    'include_environment_context_time': 'boolean', 'include_apps_instructions': 'boolean',
+    'include_collaboration_mode_instructions': 'boolean',
+    'features.memories': 'boolean', 'memories.generate_memories': 'boolean',
+    'memories.use_memories': 'boolean', 'memories.disable_on_external_context': 'boolean',
+    'web_search': 'choice', 'tool_output_token_limit': 'integer', 'background_terminal_max_timeout': 'integer',
+    'history.persistence': 'choice', 'history.max_bytes': 'integer',
 }
-PERMISSIONS = {'approval_policy', 'sandbox_mode'}
-REQUIREMENTS = {'approval_policy': 'allowedApprovalPolicies', 'sandbox_mode': 'allowedSandboxModes', 'web_search': 'allowedWebSearchModes'}
+PERMISSIONS = {'approval_policy', 'approvals_reviewer', 'sandbox_mode', 'allow_login_shell'}
+LEGACY_PERMISSIONS = {'approval_policy', 'sandbox_mode'}
+REQUIREMENTS = {'approval_policy': 'allowedApprovalPolicies', 'approvals_reviewer': 'allowedApprovalsReviewers',
+                'sandbox_mode': 'allowedSandboxModes', 'web_search': 'allowedWebSearchModes'}
+# ConfigReadResponse's typed projection omits some ConfigToml fields. Only
+# enable these options when config/read actually advertises their parent key.
+TOML_CHOICES = {'personality': ['none', 'friendly', 'pragmatic'],
+                'service_tier': ['default', 'fast', 'flex'],
+                'history.persistence': ['save-all', 'none']}
+MODEL_IDS = {'model', 'review_model'}
+EFFORT_IDS = {'model_reasoning_effort', 'plan_mode_reasoning_effort'}
+INTEGER_BOUNDS = {'model_context_window': (1, 2**53 - 1),
+                  'model_auto_compact_token_limit': (1, 2**53 - 1),
+                  'model_post_turn_compact_threshold_percent': (0, 100)}
 MAX_CONFIG_BYTES = 1024 * 1024
+
+
+def config_value(config, key):
+    for part in key.split('.'):
+        if not isinstance(config, dict):
+            return None
+        config = config.get(part)
+    return config
+
+
+def typed_value(kind, value):
+    expected = {'integer': int, 'boolean': bool}.get(kind, str)
+    return type(value) is expected
 
 
 def digest(value):
@@ -104,7 +142,7 @@ class CodexSettings:
         write_params = schema['files'].get('ConfigBatchWriteParams', {}).get('properties', {})
         reason = ''
         if scope['key']:
-            reason = '项目有效配置只读：当前 Codex 写接口只允许写用户配置。'
+            reason = '项目配置只读。请在 Mac 编辑项目的 .codex/config.toml。'
         elif 'config/batchWrite' not in schema['methods'] or not {'edits', 'expectedVersion'} <= write_params.keys():
             reason = '运行时未提供可校验版本的配置写接口。'
         elif not user or not isinstance(user.get('version'), str):
@@ -122,33 +160,43 @@ class CodexSettings:
             raise SettingsError('配置层结构不兼容。', 'unsupported')
         fields = {}
         for key, kind in FIELDS.items():
-            choices = enum_values(properties.get(key, {}), definitions)
+            root = key.split('.')[0]
+            supported = root in properties or root in config
+            if key == 'features.memories':
+                supported = isinstance(config_value(config, key), bool)
+            declaration = properties.get(key, {})
+            choices = enum_values(declaration, definitions) or TOML_CHOICES.get(key, [])
             # Newer runtimes advertise model-dependent effort strings instead
             # of an enum. Do not freeze old effort names into the protocol.
-            if key == 'model_reasoning_effort' and not choices and allows_string(properties.get(key, {}), definitions):
+            if key in EFFORT_IDS and not choices and (allows_string(declaration, definitions) or key == 'plan_mode_reasoning_effort'):
                 kind = 'text'
             restriction = (requirements or {}).get(REQUIREMENTS.get(key, ''))
             if isinstance(restriction, list):
                 choices = [v for v in choices if v in restriction]
             field_reason = reason
-            if key not in properties:
+            if not supported:
                 field_reason = '当前运行时未声明此配置项。'
             elif kind == 'choice' and not choices:
                 field_reason = '此配置项没有可用的选项或被管理员限制。'
-            elif key in PERMISSIONS and (config.get('permissions') is not None or config.get('default_permissions') is not None):
+            elif key == 'allow_login_shell' and isinstance((requirements or {}).get('allowLoginShell'), bool):
+                field_reason = '登录 Shell 由管理员管理。'
+            elif key in LEGACY_PERMISSIONS and (config.get('permissions') is not None or config.get('default_permissions') is not None):
                 field_reason = '已配置命名权限方案，避免与旧式沙盒设置冲突；请在 Mac 管理。'
-            effective = config.get(key)
-            value = local.get(key)
-            limit = 32768 if key == 'developer_instructions' else 200
+            effective = config_value(config, key)
+            value = config_value(local, key)
+            limit = 32768 if kind == 'multiline' else 200
             oversized = any(isinstance(v, str) and len(v) > limit for v in (effective, value))
-            if (effective is not None and not isinstance(effective, str)) or (value is not None and not isinstance(value, str)):
+            if any(v is not None and not typed_value(kind, v) for v in (effective, value)):
                 field_reason = '这是高级结构化设置，当前表单只读。'
             if oversized:
                 field_reason = '此配置值过长，显示已截断；请在 Mac 管理。'
-            fields[key] = {'kind': kind, 'value': value if isinstance(value, str) else None,
-                'effective': effective if isinstance(effective, str) else None,
+            fields[key] = {'kind': kind, 'value': value if typed_value(kind, value) else None,
+                'effective': effective if typed_value(kind, effective) else None,
                 'structured': isinstance(effective, (dict, list)), 'choices': choices,
+                'supported': supported, 'confirm': key in PERMISSIONS,
                 'origin': origin(raw.get('origins', {}).get(key)), 'editable': not field_reason, 'reason': field_reason}
+            if kind == 'integer':
+                fields[key]['minimum'], fields[key]['maximum'] = INTEGER_BOUNDS.get(key, (0, 2**53 - 1))
             if oversized:
                 for part in ('value', 'effective'):
                     if isinstance(fields[key][part], str): fields[key][part] = fields[key][part][:limit]
@@ -193,20 +241,22 @@ class CodexSettings:
                 if not field['editable']:
                     raise SettingsError(field['reason'], 'read_only', 403)
                 if value is not None:
-                    if not isinstance(value, str):
-                        raise ValueError('设置值必须是字符串或 null')
+                    if not typed_value(field['kind'], value):
+                        raise ValueError('设置值类型不正确')
                     if field['kind'] == 'choice' and value not in field['choices']:
                         raise ValueError('选项不受运行时支持或被管理员限制')
-                    if name == 'model' and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_./:@+\-]{0,199}', value):
+                    if field['kind'] == 'integer' and not field['minimum'] <= value <= field['maximum']:
+                        raise ValueError('数字超出此设置的取值范围')
+                    if name in MODEL_IDS and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_./:@+\-]{0,199}', value):
                         raise ValueError('模型 ID 无效')
-                    if name == 'model_reasoning_effort' and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_\-]{0,79}', value):
+                    if name in EFFORT_IDS and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_\-]{0,79}', value):
                         raise ValueError('推理强度 ID 无效；请参考模型目录')
-                    if name == 'developer_instructions' and (len(value) > 32768 or '\x00' in value):
-                        raise ValueError('开发者指令过长或包含无效字符')
+                    if field['kind'] == 'multiline' and (len(value) > 32768 or '\x00' in value):
+                        raise ValueError('文本过长或包含无效字符')
                 if value == field['value']:
                     continue
                 if name in PERMISSIONS and body.get('confirmPermissions') is not True:
-                    raise ValueError('修改审批或沙盒设置前必须确认其影响')
+                    raise ValueError('请确认执行权限变更')
                 edits.append({'keyPath': name, 'value': value, 'mergeStrategy': 'replace'})
             if not edits:
                 return {'status': 'unchanged', 'settings': self.read(key), 'overridden': []}
@@ -222,7 +272,7 @@ class CodexSettings:
             except (SettingsError, OSError):
                 raise SettingsError('写接口已返回，但回读失败；设置可能已保存，请重新读取。', 'unconfirmed') from None
             stored = (layer or {}).get('config', {})
-            if any((e['value'] is None and e['keyPath'] in stored) or (e['value'] is not None and stored.get(e['keyPath']) != e['value']) for e in edits):
+            if any(config_value(stored, e['keyPath']) != e['value'] for e in edits):
                 raise SettingsError('回读值与提交值不同，可能发生并发修改；请重新读取。', 'unconfirmed')
             overridden = [e['keyPath'] for e in edits if e['value'] is not None and after['fields'][e['keyPath']]['effective'] != e['value']]
             self.snapshots.pop(body['revision'], None)
