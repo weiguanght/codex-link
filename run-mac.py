@@ -20,6 +20,7 @@ def main():
     parser.add_argument('--bridge', type=Path, default=DEFAULT_BRIDGE,
                         help='开发者可选：覆盖内置网关路径；正常使用无需指定')
     parser.add_argument('--check-runtime', action='store_true', help='只检查内置运行时，不启动网关或读取配对数据')
+    parser.add_argument('--check-desktop', action='store_true', help='只检查桌面 IPC 握手，不启动网关或打开会话')
     parser.add_argument('--data', type=Path, default=ROOT / '.local')
     parser.add_argument('--codex-home', type=Path, default=Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex'))))
     parser.add_argument('--port', type=int, default=18443)
@@ -28,6 +29,27 @@ def main():
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error('端口必须为 1–65535')
+    if args.check_desktop:
+        try:
+            activate_bridge(args.bridge)
+        except (ValueError, ImportError) as exc:
+            parser.error(str(exc))
+        from bridge.ipc import IPCError
+        from bridge.transport import ipc_endpoint
+        from mac.desktop_bridge import DesktopEndpointUnavailable, LocalDesktopIPC
+        ipc = LocalDesktopIPC(ipc_endpoint(args.codex_home))
+        try:
+            ipc.connect()
+            print('桌面 IPC 握手成功')
+        except DesktopEndpointUnavailable as exc:
+            print(f'桌面 IPC 不可用（{exc.reason}）', file=sys.stderr)
+            return 1
+        except (IPCError, KeyError, TypeError):
+            print('桌面 IPC 握手未完成', file=sys.stderr)
+            return 1
+        finally:
+            ipc.close()
+        return 0
     if args.check_runtime:
         try:
             runtime = activate_bridge(args.bridge)
@@ -124,4 +146,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

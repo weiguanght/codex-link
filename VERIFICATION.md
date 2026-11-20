@@ -1,5 +1,12 @@
 # 验证记录
 
+## 桌面实时接口不可用时保留历史（2026-11-20）
+
+- 本机 Intel 桌面 `26.1117.31558`（29513）正常运行，但原桌面 IPC 返回 `ECONNREFUSED`。经过证书绑定和设备认证的请求仍可加载首页及真实会话历史。另有一个常驻 App Server 的控制 socket，当前桌面则通过 stdio 连接自身的运行时。
+- 网关识别 socket 缺失和拒绝连接。桌面进程已运行但没有 IPC 监听时，连接操作立即返回具体原因，手机继续显示已保存的历史。真实会话历史接口返回 200，连接操作在 0.17 秒内返回 409。记录见 `build/desktop-connection-live.log`。
+- 从 Intel 更新源取得 OpenAI 签名的 `26.1111.21308`（27194），在独立配置目录确认 IPC 握手成功。同一构建此前通过真实会话的版本 13 快照验证。此次未验证回退后能否接续当前正在运行的任务。
+- Python 测试 171 项通过，iOS 模拟器 smoke 26 项通过。Release 构建及 TrollStore 签名校验通过。日志见 `build/desktop-connection-tests.log`、`build/desktop-connection-smoke.log` 和 `build/desktop-connection-build.log`。
+
 ## 任务过程分组与按需读取（2026-11-18）
 
 - iOS 按轮次显示用户发起消息、耗时摘要和最终回答；中途模型／用户消息、工具调用与文件变更收进过程区块。运行中默认展开，完成后默认收起，展开时分页读取过程。过程行继续由 UIKit 复用，开合与插入保留阅读锚点。

@@ -212,6 +212,7 @@ python3 run-mac.py --help
 | `--codex-home` | 使用 `CODEX_HOME` 环境变量；未设置时为 `~/.codex` |
 | `--data` | 项目下 `.local/`，保存证书、设备授权与网关状态 |
 | `--check-runtime` | 只检查运行时依赖，不启动网关 |
+| `--check-desktop` | 检查本机桌面 IPC 握手，不打开会话 |
 | `--list-devices` | 列出已授权及已撤销的设备 |
 | `--revoke DEVICE_ID` | 撤销指定设备的授权 |
 | `--bridge PATH` | 开发者显式覆盖内置运行时路径，普通使用无需指定 |
@@ -412,7 +413,9 @@ python3 scripts/test-standalone.py
 
 ### 能连接网关，但无法读取或控制 Codex
 
-检查 Codex 桌面版是否正常运行、`CODEX_HOME`／`--codex-home` 是否正确，以及当前 Codex 版本与上游 IPC 是否兼容。优先在独立测试会话中排查。
+如果首页和历史消息能加载，但对话提示「桌面实时接口不可用」，在 Mac 上运行 `python3 run-mac.py --check-desktop`。使用自定义 Codex 数据目录时，指定网关正在使用的 `--codex-home`。
+
+如果打开 Codex 桌面版后仍报告 `socket_missing` 或 `socket_refused`，该实例没有在网关使用的 IPC 地址监听。此时可以阅读保存的历史。实时发送、停止和审批需要桌面会话连接恢复。
 
 ### 可以直接用浏览器打开地址吗
 

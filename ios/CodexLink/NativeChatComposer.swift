@@ -31,7 +31,16 @@ struct NativeChatComposer: View {
                 }.foregroundStyle(.secondary).padding(18)
             } else {
                 if !chat.connected {
-                    HStack { Text(chat.meta["connecting"].bool || chat.meta["activating"].bool ? "正在连接 Mac 会话…" : "会话尚未连接").font(.caption).foregroundStyle(.secondary); Spacer(); Button("连接会话") { perform { try await chat.reconnect() } }.font(.caption.weight(.medium)) }.padding(.horizontal, 9)
+                    let connecting = chat.meta["connecting"].bool || chat.meta["activating"].bool
+                    let detail = chat.meta["connectionError"].string
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(connecting ? "正在连接 Mac 会话…" : detail.isEmpty ? "会话尚未连接" : detail)
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
+                        Button("连接会话") { perform { try await chat.reconnect() } }
+                            .font(.caption.weight(.medium))
+                            .fixedSize()
+                    }.padding(.horizontal, 9)
                 }
                 if !draft.value.attachments.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) { HStack {

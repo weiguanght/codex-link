@@ -1,5 +1,6 @@
 """Desktop stream compatibility retains upstream ownership and revision guards."""
 import copy
+import errno
 from pathlib import Path
 import sys
 import threading
@@ -13,9 +14,37 @@ from mac.runtime import activate_bridge
 activate_bridge()
 from bridge.service import LiveSession
 from bridge.ipc import IPCError
-from mac.desktop_bridge import DesktopBridge
+from mac.desktop_bridge import DesktopBridge, DesktopEndpointUnavailable, LocalDesktopIPC
 
 KEY = '01a1c5a9-a560-71c2-9640-6aefe2cde517'
+
+
+class DesktopEndpointTests(unittest.TestCase):
+    def test_endpoint_failures_are_distinguished_from_handshake_errors(self):
+        ipc = LocalDesktopIPC('/synthetic/ipc.sock')
+        for code, reason in ((errno.ENOENT, 'socket_missing'), (errno.ECONNREFUSED, 'socket_refused')):
+            with self.subTest(code=code), patch('bridge.ipc.connect_stream', side_effect=OSError(code, 'synthetic')):
+                with self.assertRaises(DesktopEndpointUnavailable) as raised:
+                    ipc.connect()
+                self.assertEqual(raised.exception.reason, reason)
+        with patch('bridge.ipc.DesktopIPC.connect', side_effect=IPCError('handshake failed')):
+            with self.assertRaisesRegex(IPCError, 'handshake failed'):
+                ipc.connect()
+
+    def test_active_app_without_ipc_fails_fast_but_closed_app_can_still_launch(self):
+        bridge = DesktopBridge.__new__(DesktopBridge)
+        bridge.session = Mock(return_value=LiveSession(KEY))
+        bridge.ipc = Mock(client_id=None)
+        bridge.ipc.connect.side_effect = DesktopEndpointUnavailable('socket_refused')
+        bridge._desktop_running = Mock(side_effect=[True, False])
+        with patch('bridge.service.Bridge.activate') as activate:
+            with self.assertLogs('mac.desktop_bridge', 'WARNING') as output:
+                with self.assertRaises(DesktopEndpointUnavailable):
+                    bridge.activate(KEY)
+            self.assertIn('socket_refused', output.output[0])
+            activate.assert_not_called()
+            self.assertIs(bridge.activate(KEY), activate.return_value)
+            activate.assert_called_once_with(KEY)
 
 
 class DesktopBridgeTests(unittest.TestCase):
