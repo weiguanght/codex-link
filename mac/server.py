@@ -109,6 +109,15 @@ class LinkHandler(Handler):
         if path in ('/api/login', '/api/pair'):
             self.close_connection = True
             return self.output(403, {'error': '此入口仅支持设备配对，不接受密码或二维码登录'})
+        if getattr(self.server.bridge, 'shared_desktop', False) and path in ('/api/accounts/switch', '/api/account/reset'):
+            try:
+                self.check_request(write)
+                if self.authorized(write):
+                    self.output(403, {'error': '共享桌面模式请在 Mac 切换账号。'})
+            except PermissionError as exc:
+                self.output(403, {'error': str(exc)})
+            self.close_connection = True
+            return
         if not path.startswith('/link/'):
             return super().handle_method(write)
         try:

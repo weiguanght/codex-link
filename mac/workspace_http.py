@@ -22,6 +22,8 @@ def archive(bridge, key, archived):
             queued = any(k.startswith(key + ':') and v.get('status') in ('queued', 'unknown') for k, v in getattr(bridge, 'submissions', {}).items())
         if session.activating or queued or async_requests(session.state or {}) or any(t.get('status') == 'inProgress' for t in ordered_turns(session.state or {})):
             raise ValueError('会话正在执行，请先在对话中确认任务结束后再归档')
+        if getattr(bridge, 'shared_desktop', False):
+            return bridge.archive_shared(key, archived)
         result = _runtime_operation(bridge.catalog_reader.executable, bridge.codex_home, str(bridge.codex_home),
             lambda request: request('thread/archive' if archived else 'thread/unarchive', {'threadId': key}))
     return result
@@ -29,6 +31,8 @@ def archive(bridge, key, archived):
 
 @operation
 def delete_conversation(bridge, key, backup_root, read_only=False):
+    if getattr(bridge, 'shared_desktop', False):
+        raise PermissionError('共享桌面模式请在 Mac 永久删除会话。')
     if not read_only:
         bridge.store.get(key)
         session = bridge.session(key, attach=False, background=True)

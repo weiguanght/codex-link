@@ -126,7 +126,7 @@ codex-link 是一个基于 [codex-mobile-bridge](https://github.com/try2love/cod
 - macOS 系统工具：`dns-sd`、`osascript`、`ifconfig`、`openssl`。
 - Mac、Codex 和网关在使用期间保持运行；外网访问时电脑不能休眠或断网。
 
-网关 Python 代码只依赖标准库，正常运行不需要 `pip install`、Node.js、npm 或 Electron。源码自包含不表示捆绑了 Python、系统工具或 Codex。
+默认 IPC 模式的网关只依赖 Python 标准库。新版共享 App Server 模式额外需要 Python `websockets` 15。
 
 ### 手机与网络
 
@@ -167,6 +167,21 @@ python3 run-mac.py
 默认提供 **HTTPS，TCP 18443**，同时监听 IPv4 和 IPv6。终端会显示当前地址。保留这个进程，按 `Ctrl-C` 停止。
 
 如果 macOS 防火墙询问 Python 的传入连接，请按需要允许。程序不会自动关闭防火墙、修改路由器、设置开机启动或阻止电脑休眠。
+
+#### 新版桌面共用本地 App Server
+
+Intel 桌面版 `26.1117.31558`（29513）使用此启动方式。先退出 Mac 上的 Codex 桌面和当前网关，再从项目目录运行以下命令。将最后的路径换成新版 App 的实际位置。
+
+```sh
+python3 -m pip install 'websockets>=15,<16'
+python3 run-mac.py --shared-desktop /path/to/ChatGPT.app
+```
+
+启动器运行所选 App 随带的 Codex Runtime，并让桌面和网关共用一个本地 Unix socket。如果当前 Codex 数据目录已有运行中的 App Server daemon，添加 `--shared-use-daemon` 复用它。Intel `26.1117.31558` 已与 daemon `0.171.0` 配合验证。
+
+沿用原来的 `--data`、`--port` 和 Codex 数据目录即可使用已有设备配对及本地会话。关闭共享网关会同时关闭它启动的桌面和 Runtime。独立启动的 daemon 继续运行。
+
+已验证新建、普通发送、补充、停止、模型与推理强度、归档和取消归档。打开尚未加载的会话时，可以用「连接会话」恢复。审批和问答、计划和目标模式、编辑与分支、永久删除、切换账号请在 Mac 操作。启动日志位于网关数据目录的 `shared-desktop.log` 和 `shared-app-server.log`。
 
 ### 3. 安装 iOS 客户端
 
@@ -213,6 +228,8 @@ python3 run-mac.py --help
 | `--data` | 项目下 `.local/`，保存证书、设备授权与网关状态 |
 | `--check-runtime` | 只检查运行时依赖，不启动网关 |
 | `--check-desktop` | 检查本机桌面 IPC 握手，不打开会话 |
+| `--shared-desktop CHATGPT.APP` | 让所选新版桌面与网关共用本地 App Server |
+| `--shared-use-daemon` | 共用当前 Codex 数据目录中运行的 App Server daemon，需与 `--shared-desktop` 一起使用 |
 | `--list-devices` | 列出已授权及已撤销的设备 |
 | `--revoke DEVICE_ID` | 撤销指定设备的授权 |
 | `--bridge PATH` | 开发者显式覆盖内置运行时路径，普通使用无需指定 |
@@ -415,7 +432,7 @@ python3 scripts/test-standalone.py
 
 如果首页和历史消息能加载，但对话提示「桌面实时接口不可用」，在 Mac 上运行 `python3 run-mac.py --check-desktop`。使用自定义 Codex 数据目录时，指定网关正在使用的 `--codex-home`。
 
-如果打开 Codex 桌面版后仍报告 `socket_missing` 或 `socket_refused`，该实例没有在网关使用的 IPC 地址监听。此时可以阅读保存的历史。实时发送、停止和审批需要桌面会话连接恢复。
+如果打开 Codex 桌面版后仍报告 `socket_missing` 或 `socket_refused`，该实例没有在网关使用的 IPC 地址监听。此时可以阅读保存的历史。Intel `26.1117.31558` 可以按上文「新版桌面共用本地 App Server」启动。
 
 ### 可以直接用浏览器打开地址吗
 

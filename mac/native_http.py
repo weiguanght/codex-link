@@ -11,12 +11,12 @@ THREAD = re.compile(r'^/api/native/v1/threads/([0-9a-f-]{36})/(timeline|changes|
 WORKSPACE = re.compile(r'^/api/native/v1/threads/([0-9a-f-]{36})/workspace/(tree|search|file|import|repositories|changes|patch)$')
 
 
-def capabilities(row):
+def capabilities(row, shared_desktop=False):
     control = not row.get('readOnly', True)
-    return {'readOnly': not control, 'send': control, 'stop': control, 'respond': control,
+    return {'readOnly': not control, 'send': control, 'stop': control, 'respond': control and not shared_desktop,
             'attachments': control, 'rename': control, 'threadSettings': control,
             'archive': control and row.get('host') == 'local', 'pin': True, 'hide': True,
-            'permanentDelete': control and row.get('host') == 'local',
+            'permanentDelete': control and row.get('host') == 'local' and not shared_desktop,
             'fullLog': row.get('host') == 'local' and row.get('historyReadable', False),
             'workspaceRead': control and row.get('host') == 'local' and bool(row.get('cwd')),
             'workspaceWrite': control and row.get('host') == 'local' and bool(row.get('cwd'))}
@@ -102,7 +102,8 @@ def handle(handler, write, path):
             else:
                 result = library.bridge.for_host(row['host']).timeline_read(key, mode, **options)
             # Native clients never infer execution ability from originator or UI.
-            result = dict(result, apiVersion=1, capabilities=capabilities(dict(row, readOnly=bool(read_only))))
+            result = dict(result, apiVersion=1, capabilities=capabilities(
+                dict(row, readOnly=bool(read_only)), getattr(library.bridge, 'shared_desktop', False)))
             if 'meta' in result:
                 result['meta'] = dict(result['meta'], readOnly=bool(read_only), host=row['host'],
                                       projectName=row.get('projectName', ''), cwd=row.get('cwd', ''))
