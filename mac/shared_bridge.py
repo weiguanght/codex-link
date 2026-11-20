@@ -5,7 +5,7 @@ import unicodedata
 import uuid
 
 from bridge.accounts import operation
-from bridge.create import CreationError
+from bridge.create import CreationError, persist_empty_metadata
 from bridge.ipc import IPCError
 from bridge.remote import AppHosts
 from bridge.service import Bridge
@@ -351,6 +351,7 @@ class SharedDesktopBridge(Bridge):
                 except RPCRejected as exc:
                     if not exc.empty_history:
                         raise
+                    persist_empty_metadata(self.ipc.request, thread_id)
                 entry['materialized'] = True
                 self._save_creations()
             if title and not entry.get('named'):

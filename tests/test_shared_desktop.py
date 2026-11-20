@@ -1,9 +1,10 @@
 """Regressions for the new App Server's empty history and partial completion."""
 from pathlib import Path
 import sys
+import threading
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -58,3 +59,33 @@ class SharedDesktopTests(unittest.TestCase):
         self.bridge._subscribe = Mock()
         self.bridge._attach(SimpleNamespace(), timeout=0)
         self.bridge._subscribe.assert_not_called()
+
+    def test_unnamed_chat_is_indexed_before_activation_and_retry_reuses_it(self):
+        create_id = '00000000-0000-0000-0000-000000000001'
+        thread_id = '00000000-0000-0000-0000-000000000002'
+        self.bridge.codex_home = Path('/synthetic/codex')
+        self.bridge.create_lock = threading.Lock()
+        self.bridge.creations = {}
+        self.bridge._save_creations = Mock()
+        self.bridge.activate = Mock()
+        self.bridge.ipc.request.side_effect = [
+            {'thread': {'id': thread_id}},
+            RPCRejected('thread/read', {'message': 'list_turns is not supported yet'}),
+            {'thread': {'id': thread_id, 'gitInfo': {'sha': 'abc123'}}},
+            {'thread': {'id': thread_id}},
+        ]
+        calls = Mock()
+        calls.attach_mock(self.bridge.ipc.request, 'request')
+        calls.attach_mock(self.bridge.activate, 'activate')
+
+        first = self.bridge.create_chat(None, '', create_id)
+        self.assertEqual(self.bridge.create_chat(None, '', create_id), first)
+        self.assertEqual(first['id'], thread_id)
+        self.assertEqual(calls.mock_calls, [
+            call.request('thread/start', {'cwd': '/synthetic'}),
+            call.request('thread/read', {'threadId': thread_id, 'includeTurns': True}),
+            call.request('thread/read', {'threadId': thread_id, 'includeTurns': False}),
+            call.request('thread/metadata/update', {'threadId': thread_id, 'gitInfo': {'sha': 'abc123'}}),
+            call.activate(thread_id),
+            call.activate(thread_id),
+        ])

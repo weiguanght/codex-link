@@ -64,21 +64,26 @@ class WorkspaceTests(unittest.TestCase):
             create_empty('codex', self.home, str(self.folder), '')
         self.assertEqual(calls, ['thread/start', 'thread/read'])
 
-    def test_unnamed_paginated_chat_can_be_handed_off_without_list_turns(self):
-        calls = []
+    def test_unnamed_paginated_chat_indexes_metadata_without_changing_its_name(self):
         thread_id = history.uid(906)
-        def request(method, params):
-            calls.append((method, params))
-            if method == 'thread/read' and params['includeTurns']:
-                raise CreationError('list_turns is not supported yet')
-            return {'thread': {'id': thread_id}}
-        with patch('bridge.create._runtime_operation', side_effect=lambda _runtime, _home, _cwd, operation: operation(request)):
-            self.assertEqual(create_empty('codex', self.home, str(self.folder), ''), thread_id)
-        self.assertEqual(calls, [
-            ('thread/start', {'cwd': str(self.folder), 'ephemeral': False}),
-            ('thread/read', {'threadId': thread_id, 'includeTurns': True}),
-            ('thread/read', {'threadId': thread_id, 'includeTurns': False}),
-        ])
+        for git_info in (None, {'sha': 'abc123', 'branch': 'main'}):
+            with self.subTest(git_info=git_info):
+                calls = []
+
+                def request(method, params):
+                    calls.append((method, params))
+                    if method == 'thread/read' and params['includeTurns']:
+                        raise CreationError('list_turns is not supported yet')
+                    return {'thread': {'id': thread_id, 'gitInfo': git_info}}
+
+                with patch('bridge.create._runtime_operation', side_effect=lambda _runtime, _home, _cwd, operation: operation(request)):
+                    self.assertEqual(create_empty('codex', self.home, str(self.folder), ''), thread_id)
+                self.assertEqual(calls, [
+                    ('thread/start', {'cwd': str(self.folder), 'ephemeral': False}),
+                    ('thread/read', {'threadId': thread_id, 'includeTurns': True}),
+                    ('thread/read', {'threadId': thread_id, 'includeTurns': False}),
+                    ('thread/metadata/update', {'threadId': thread_id, 'gitInfo': {'sha': git_info and git_info['sha']}}),
+                ])
 
     def test_chat_creation_keeps_unrelated_runtime_errors(self):
         for message in ('runtime disconnected', 'permission denied'):

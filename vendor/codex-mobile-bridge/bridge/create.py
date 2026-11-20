@@ -98,6 +98,15 @@ def _runtime_operation(executable, codex_home, cwd, operation):
     return result
 
 
+def persist_empty_metadata(request, thread_id):
+    # On affected runtimes, includeTurns writes the rollout but fails before
+    # the empty thread is indexed. A metadata update indexes it without
+    # giving it a name. Read the rollout's Git SHA so the update preserves it.
+    thread = request('thread/read', {'threadId': thread_id, 'includeTurns': False})['thread']
+    request('thread/metadata/update', {'threadId': thread_id,
+                                       'gitInfo': {'sha': (thread.get('gitInfo') or {}).get('sha')}})
+
+
 def create_empty(executable, codex_home, cwd, title, settings=None):
     settings = settings or {}
     def create(request):
@@ -123,7 +132,7 @@ def create_empty(executable, codex_home, cwd, title, settings=None):
             # metadata exists, then fails while listing their (empty) turns.
             if str(exc) != 'list_turns is not supported yet':
                 raise
-            request('thread/read', {'threadId': thread_id, 'includeTurns': False})
+            persist_empty_metadata(request, thread_id)
         return thread_id
     return _runtime_operation(executable, codex_home, cwd, create)
 
