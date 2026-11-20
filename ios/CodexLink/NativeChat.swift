@@ -46,31 +46,39 @@ struct NativeChatView: View {
         #if LINK_SMOKE
         let _ = NativeChatRenderMetrics.pageBodies += 1
         #endif
-        GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                home
-                    .overlay { if chat.session != nil { Color.black.opacity(0.35 * (1 - backProgress)).allowsHitTesting(false) } }
-                    .offset(x: chat.session == nil ? 0 : -geometry.size.width * 0.30 * (1 - backProgress))
-                    .allowsHitTesting(chat.session == nil)
-                    .accessibilityHidden(chat.session != nil)
-                if chat.session != nil {
-                    conversation
-                        .background(Color.linkCanvas)
-                        .offset(x: geometry.size.width * backProgress)
-                        .shadow(color: .black.opacity(0.12 * backProgress), radius: 8, x: -3)
-                        .background(NativeBackPanObserver(enabled: showSidebar && !completingBack,
-                            onChange: { distance in
-                                backProgress = min(1, max(0, distance / max(1, geometry.size.width)))
-                            }, onEnd: { distance, velocity, cancelled in
-                                let progress = min(1, max(0, distance / max(1, geometry.size.width)))
-                                if !cancelled && NativeBackNavigation.shouldFinish(progress: progress, velocity: velocity) {
-                                    completeBack()
-                                } else {
-                                    withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.88)) { backProgress = 0 }
-                                }
-                            }))
-                }
-            }.clipped()
+        VStack(spacing: 0) {
+            header
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    home
+                        .overlay { if chat.session != nil { Color.black.opacity(0.35 * (1 - backProgress)).allowsHitTesting(false) } }
+                        .offset(x: chat.session == nil ? 0 : -geometry.size.width * 0.30 * (1 - backProgress))
+                        .allowsHitTesting(chat.session == nil)
+                        .accessibilityHidden(chat.session != nil)
+                    if chat.session != nil {
+                        conversation
+                            .background(Color.linkCanvas)
+                            .offset(x: geometry.size.width * backProgress)
+                            .shadow(color: .black.opacity(0.12 * backProgress), radius: 8, x: -3)
+                            .background(NativeBackPanObserver(enabled: showSidebar && !completingBack,
+                                onChange: { distance in
+                                    backProgress = min(1, max(0, distance / max(1, geometry.size.width)))
+                                }, onEnd: { distance, velocity, cancelled in
+                                    let progress = min(1, max(0, distance / max(1, geometry.size.width)))
+                                    if !cancelled && NativeBackNavigation.shouldFinish(progress: progress, velocity: velocity) {
+                                        completeBack()
+                                    } else {
+                                        withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.88)) { backProgress = 0 }
+                                    }
+                                }))
+                    }
+                }.clipped()
+            }
+            #if LINK_SMOKE
+            .overlay(alignment: .topLeading) {
+                if ProcessInfo.processInfo.environment["LINK_SMOKE_RENDER_METRICS"] == "1" { NativeChatRenderMetricsView() }
+            }
+            #endif
         }
         .nativeCopyFeedback()
         .task(id: completingBack) {
@@ -81,12 +89,6 @@ struct NativeChatView: View {
             onHome()
         }
         .background(Color.linkCanvas)
-        #if LINK_SMOKE
-        .overlay(alignment: .topLeading) {
-            if ProcessInfo.processInfo.environment["LINK_SMOKE_RENDER_METRICS"] == "1" { NativeChatRenderMetricsView() }
-        }
-        #endif
-        .toolbar { navigationControls }
         .sheet(isPresented: $threadSettings) { NativeThreadSettings(chat: chat) }
         .sheet(isPresented: $permissionSettings) { NavigationStack { NativeCodexSettings(api: chat.api, category: .permissions) } }
         .sheet(isPresented: $sendSettings) { NativeSendSettings(draft: chat.composer) }
@@ -158,43 +160,61 @@ struct NativeChatView: View {
         focused = false
         withAnimation(.easeOut(duration: 0.25)) { backProgress = 1 }
     }
-    @ToolbarContentBuilder private var navigationControls: some ToolbarContent {
-            ToolbarItem(placement: .navigationBarLeading) {
+    // Give both pages one explicit top edge below the header.
+    private var header: some View {
+        HStack(spacing: 8) {
+            Group {
                 if chat.session != nil {
-                    NativeIconButton(symbol: "chevron.left", label: "返回", action: {
-                        completeBack()
-                    }).accessibilityIdentifier("native.chat.back")
+                    NativeIconButton(symbol: "chevron.left", label: "返回", action: completeBack)
+                        .accessibilityIdentifier("native.chat.back")
                 } else if showSidebar {
-                    NativeIconButton(symbol: "line.3.horizontal", label: "项目与对话", action: onSidebar).accessibilityIdentifier("native.sidebar")
-                }
-            }
-            ToolbarItem(placement: .principal) {
-                Button {
-                    if let row = chat.session {
-                        status = true
-                        Task { await loadSessionUsage(row) }
-                    } else {
-                        onSettings()
-                    }
-                } label: {
-                    VStack(spacing: 3) {
-                        HStack(spacing: 5) { Text(chat.session == nil ? "Codex" : chat.meta["title"].string.isEmpty ? (chat.session?.title ?? "Codex") : chat.meta["title"].string).font(.system(size: 16, weight: .semibold)).lineLimit(1); Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary) }
-                        Text(chat.session?.projectName ?? "在 Mac 上接着做").font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
-                    }.frame(maxWidth: 240)
-                }.buttonStyle(.plain).accessibilityLabel("会话状态与详情")
-            }
-            ToolbarItem(placement: .navigationBarTrailing) {
-                if chat.session == nil {
-                    NativeIconButton(symbol: "gearshape", label: "设置", action: onSettings).accessibilityIdentifier("native.home.settings")
+                    NativeIconButton(symbol: "line.3.horizontal", label: "项目与对话", action: onSidebar)
+                        .accessibilityIdentifier("native.sidebar")
                 } else {
-                    Menu { chatDropdown } label: {
-                        Image(systemName: "ellipsis").font(.system(size: 19, weight: .medium))
-                            .frame(width: 44, height: 44).contentShape(Rectangle())
-                    }
-                    .accessibilityLabel("会话菜单")
-                    .accessibilityIdentifier("native.chat.menu")
+                    Color.clear.accessibilityHidden(true)
                 }
+            }.frame(width: 44, height: 44)
+
+            Button {
+                if let row = chat.session {
+                    status = true
+                    Task { await loadSessionUsage(row) }
+                } else {
+                    onSettings()
+                }
+            } label: {
+                VStack(spacing: 3) {
+                    HStack(spacing: 5) {
+                        Text(headerTitle).font(.system(size: 16, weight: .semibold)).lineLimit(1)
+                        Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(chat.session?.projectName ?? "在 Mac 上接着做")
+                        .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                }.frame(maxWidth: 240)
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("会话状态与详情")
+            .frame(maxWidth: .infinity)
+
+            if chat.session == nil {
+                NativeIconButton(symbol: "gearshape", label: "设置", action: onSettings)
+                    .accessibilityIdentifier("native.home.settings")
+            } else {
+                Menu { chatDropdown } label: {
+                    Image(systemName: "ellipsis").font(.system(size: 19, weight: .medium))
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .accessibilityLabel("会话菜单")
+                .accessibilityIdentifier("native.chat.menu")
+            }
+        }
+        .padding(.horizontal, 8)
+    }
+    private var headerTitle: String {
+        guard let session = chat.session else { return "Codex" }
+        let title = chat.meta["title"].string
+        return title.isEmpty ? session.title : title
     }
     private func menuAction(_ title: String, icon: String, identifier: String, enabled: Bool = true, action: @escaping () -> Void) -> some View {
         Button(action: action) {

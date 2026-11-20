@@ -63,10 +63,10 @@ struct ContentView: View {
                 librarySheet.frame(width: 320)
                 Divider()
             }
-            NavigationStack {
-                if connection.connectedURL != nil {
-                    NativeChatView(chat: chat, workspace: workspace, onSidebar: { sidebar = true }, onHome: { workspace.selected = nil; workspace.selectProject(nil); chat.logView = false }, onNewChat: { prompt in initialPrompt = prompt; newChat = true }, onSettings: { settings = true }, showSidebar: sizeClass != .regular)
-                } else { NativeWelcome(connection: connection, onSettings: { settings = true }) }
+            if connection.connectedURL != nil {
+                NativeChatView(chat: chat, workspace: workspace, onSidebar: { sidebar = true }, onHome: { workspace.selected = nil; workspace.selectProject(nil); chat.logView = false }, onNewChat: { prompt in initialPrompt = prompt; newChat = true }, onSettings: { settings = true }, showSidebar: sizeClass != .regular)
+            } else {
+                NavigationStack { NativeWelcome(connection: connection, onSettings: { settings = true }) }
             }
         }
     }

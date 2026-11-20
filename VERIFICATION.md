@@ -1,5 +1,10 @@
 # 验证记录
 
+## 首页与消息页顶部布局（2026-11-21）
+
+- 首页和消息页共用固定标题栏，滚动区从标题栏下缘开始。iPhone 15（iOS 17.2）模拟器通过 2 项定向 UI 测试，覆盖首条消息、反复打开会话和返回首页、边缘滑动及标题栏菜单。测试结果保存在 `build/top-layout/ui-005656.xcresult` 和 `build/top-layout/menu.xcresult`。
+- arm64 Release 构建、TrollStore 签名和 IPA 校验通过。覆盖安装即可生效。构建日志位于 `build/top-layout/release.log`。
+
 ## 1 MB 以上的冷门语法改用轻量高亮（2026-11-21）
 
 - Dart、Elm、R 改用 Highlight.js，Bicep、Pascal、Zig 改用 Prism。移除 21.9 MiB 的生成解析器源码。模拟器定向 smoke 验证了 60 种高亮模式，覆盖新替换语法的代表性 token、扩展名和 SQL 编辑撤销。日志见 `build/syntax-1mb/syntax-smoke.log`。

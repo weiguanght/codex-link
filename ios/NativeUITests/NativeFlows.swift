@@ -179,6 +179,8 @@ final class NativeFlows: XCTestCase {
         app.launch()
         let desktop = app.buttons["native.home.session.00000000-0000-0000-0000-000000000002"]
         XCTAssertTrue(desktop.waitForExistence(timeout: 40))
+        assertHomeTop(app)
+        capture("Home content directly below its header")
         let readOnlyMenu = app.buttons["native.session.actions.00000000-0000-0000-0000-000000000001"]
         readOnlyMenu.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         XCTAssertTrue(app.buttons["永久删除…"].waitForExistence(timeout: 5))
@@ -188,6 +190,9 @@ final class NativeFlows: XCTestCase {
         desktop.tap()
         let transcript = app.descendants(matching: .any).matching(identifier: "native.transcript").firstMatch
         XCTAssertTrue(transcript.waitForExistence(timeout: 10))
+        let menu = app.buttons["native.chat.menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        XCTAssertEqual(transcript.frame.minY, menu.frame.maxY, accuracy: 2)
         for _ in 0..<4 { transcript.swipeDown() }
         let firstMessage = app.cells["native.message.row.u1"]
         XCTAssertTrue(firstMessage.waitForExistence(timeout: 5))
@@ -203,7 +208,7 @@ final class NativeFlows: XCTestCase {
         XCTAssertTrue(app.buttons["native.message.copy.user"].exists, "User messages need a one-tap copy action")
         app.buttons["native.message.copy.user"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["native.copy.feedback"].waitForExistence(timeout: 2), "Copy should show a centered confirmation")
-        capture("Transcript begins directly under the navigation bar")
+        capture("Transcript begins directly under its header")
         XCTAssertTrue(app.buttons["native.chat.back"].exists)
         let startAtTop = app.coordinate(withNormalizedOffset: CGVector(dx: 0.002, dy: 0.45))
         startAtTop.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.20, dy: 0.45)), withVelocity: .slow, thenHoldForDuration: 0.2)
@@ -224,7 +229,17 @@ final class NativeFlows: XCTestCase {
         XCTAssertTrue(app.buttons["native.chat.back"].waitForExistence(timeout: 10))
         app.buttons["native.chat.back"].tap()
         XCTAssertTrue(desktop.waitForExistence(timeout: 5))
+        assertHomeTop(app)
         capture("Repeated desktop and read-only session opening and interactive back")
+    }
+
+    private func assertHomeTop(_ app: XCUIApplication) {
+        let settings = app.buttons["native.home.settings"]
+        let home = app.scrollViews["native.home"]
+        let heading = app.staticTexts["接着推进你的工作"]
+        XCTAssertTrue(settings.isHittable && heading.isHittable)
+        XCTAssertEqual(home.frame.minY, settings.frame.maxY, accuracy: 2)
+        XCTAssertEqual(heading.frame.minY, home.frame.minY + 18, accuracy: 4)
     }
 
     func testAutomaticHistoryAndRepositorySelection() throws {
