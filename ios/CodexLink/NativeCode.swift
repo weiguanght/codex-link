@@ -72,22 +72,27 @@ struct NativeCodeView: UIViewRepresentable {
             context.coordinator.configure(view, text: text, language: language)
         }
     }
-    static func dismantleUIView(_ view: Runestone.TextView, coordinator: Coordinator) { coordinator.generation += 1; view.editorDelegate = nil }
+    static func dismantleUIView(_ view: Runestone.TextView, coordinator: Coordinator) { coordinator.generation += 1; coordinator.pendingHighlight?.cancel(); view.editorDelegate = nil }
     final class Coordinator: NSObject, TextViewDelegate {
         var parent: NativeCodeView
         var hint = ""
         var generation = 0
         var preparing = false
         var lastAppliedText = ""
+        var pendingHighlight: Task<Void, Never>?
         init(_ parent: NativeCodeView) { self.parent = parent }
         func configure(_ view: Runestone.TextView, text: String, language: String) {
             hint = language; generation += 1; let token = generation; preparing = true; lastAppliedText = text
             view.isEditable = false
+            pendingHighlight?.cancel()
             DispatchQueue.global(qos: .userInitiated).async { [weak self, weak view] in
                 let theme = NativeCodeTheme()
                 let state: TextViewState
                 if let grammar = NativeCodeLanguages.language(language) { state = TextViewState(text: text, theme: theme, language: grammar, languageProvider: NativeCodeLanguageProvider()) }
-                else { state = TextViewState(text: text, theme: theme) }
+                else if let tokenizer = NativeCodeLanguages.tokenizer(language) {
+                    let highlights = NativeLexicalSyntax.highlights(text, language: tokenizer)
+                    state = TextViewState(text: text, theme: theme, syntaxHighlights: highlights)
+                } else { state = TextViewState(text: text, theme: theme) }
                 DispatchQueue.main.async {
                     guard let self, let view, self.generation == token else { return }
                     view.setState(state)
@@ -99,7 +104,29 @@ struct NativeCodeView: UIViewRepresentable {
                 }
             }
         }
-        func textViewDidChange(_ view: Runestone.TextView) { if !preparing && parent.editable { lastAppliedText = view.text; view.accessibilityValue = view.text; parent.text = view.text } }
+        func textViewDidChange(_ view: Runestone.TextView) {
+            guard !preparing, parent.editable else { return }
+            let editedText = view.text
+            lastAppliedText = editedText
+            view.accessibilityValue = editedText
+            parent.text = editedText
+            guard let tokenizer = NativeCodeLanguages.tokenizer(hint) else { return }
+            pendingHighlight?.cancel()
+            let document = generation
+            pendingHighlight = Task { @MainActor [weak self, weak view] in
+                do { try await Task.sleep(nanoseconds: 150_000_000) } catch { return }
+                let worker = Task.detached(priority: .userInitiated) {
+                    NativeLexicalSyntax.highlights(editedText, language: tokenizer)
+                }
+                let highlights = await withTaskCancellationHandler {
+                    await worker.value
+                } onCancel: {
+                    worker.cancel()
+                }
+                guard !Task.isCancelled, let self, let view, self.generation == document else { return }
+                view.updateSyntaxHighlights(highlights)
+            }
+        }
     }
 }
 
@@ -126,10 +153,19 @@ struct NativeCodeBlock: View {
 /// A selectable, naturally sized code block without an editor gutter or nested sheet.
 /// Parsing stays off the main actor, including for streamed command updates.
 enum NativeSyntaxHighlight {
+    static func native(_ text: String, language: String, theme: NativeCodeTheme = NativeCodeTheme()) -> NSAttributedString {
+        if let tokenizer = NativeCodeLanguages.tokenizer(language) {
+            return NativeLexicalSyntax.attributed(text, language: tokenizer, theme: theme)
+        }
+        guard !text.isEmpty, let grammar = NativeCodeLanguages.language(language) else {
+            return NSAttributedString(string: text)
+        }
+        let highlighter = Runestone.StringSyntaxHighlighter(theme: theme, language: grammar, languageProvider: NativeCodeLanguageProvider())
+        return highlighter.syntaxHighlight(text)
+    }
+
     static func text(_ text: String, language: String) -> AttributedString {
-        guard !text.isEmpty, let grammar = NativeCodeLanguages.language(language) else { return AttributedString(text) }
-        let highlighter = Runestone.StringSyntaxHighlighter(theme: NativeCodeTheme(), language: grammar, languageProvider: NativeCodeLanguageProvider())
-        return (try? AttributedString(highlighter.syntaxHighlight(text), including: \.uiKit)) ?? AttributedString(text)
+        (try? AttributedString(native(text, language: language), including: \.uiKit)) ?? AttributedString(text)
     }
 }
 struct NativeSyntaxText: View {

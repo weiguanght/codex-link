@@ -55,6 +55,17 @@ public final class TextViewState {
         self.languageMode = PlainTextInternalLanguageMode()
         prepare(with: text)
     }
+
+    /// Creates an editor state using precomputed highlights sorted by UTF-16 range.
+    public init(text: String, theme: Theme, syntaxHighlights: [SyntaxHighlight]) {
+        self.theme = theme
+        self.stringView = StringView(string: NSMutableString(string: text))
+        self.lineManager = LineManager(stringView: stringView)
+        let mode = ExternalSyntaxMode()
+        self.languageMode = mode
+        prepare(with: text)
+        mode.update(syntaxHighlights)
+    }
 }
 
 private extension TextViewState {

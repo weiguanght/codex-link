@@ -1,5 +1,4 @@
 // Re-export the Runestone integration for every bundled language.
-@_exported import TreeSitterAgdaRunestone
 @_exported import TreeSitterAstroRunestone
 @_exported import TreeSitterBashRunestone
 @_exported import TreeSitterBicepRunestone
@@ -12,7 +11,6 @@
 @_exported import TreeSitterDartRunestone
 @_exported import TreeSitterDiffRunestone
 @_exported import TreeSitterDockerfileRunestone
-@_exported import TreeSitterElixirRunestone
 @_exported import TreeSitterElmRunestone
 @_exported import TreeSitterFishRunestone
 @_exported import TreeSitterGlimmerRunestone
@@ -20,25 +18,19 @@
 @_exported import TreeSitterGoRunestone
 @_exported import TreeSitterHCLRunestone
 @_exported import TreeSitterHTMLRunestone
-@_exported import TreeSitterHaskellRunestone
 @_exported import TreeSitterJSDocRunestone
 @_exported import TreeSitterJSON5Runestone
 @_exported import TreeSitterJSONRunestone
 @_exported import TreeSitterJavaRunestone
 @_exported import TreeSitterJavaScriptRunestone
-@_exported import TreeSitterJuliaRunestone
 @_exported import TreeSitterKotlinRunestone
-@_exported import TreeSitterLaTeXRunestone
 @_exported import TreeSitterLuaRunestone
 @_exported import TreeSitterMarkdownInlineRunestone
 @_exported import TreeSitterMarkdownRunestone
 @_exported import TreeSitterNixRunestone
-@_exported import TreeSitterOCamlInterfaceRunestone
-@_exported import TreeSitterOCamlRunestone
 @_exported import TreeSitterObjectiveCRunestone
 @_exported import TreeSitterPHPRunestone
 @_exported import TreeSitterPascalRunestone
-@_exported import TreeSitterPerlRunestone
 @_exported import TreeSitterProtoRunestone
 @_exported import TreeSitterPythonRunestone
 @_exported import TreeSitterRRunestone
@@ -46,14 +38,11 @@
 @_exported import TreeSitterRubyRunestone
 @_exported import TreeSitterRustRunestone
 @_exported import TreeSitterSCSSRunestone
-@_exported import TreeSitterSQLRunestone
-@_exported import TreeSitterScalaRunestone
 @_exported import TreeSitterSvelteRunestone
 @_exported import TreeSitterSwiftRunestone
 @_exported import TreeSitterTOMLRunestone
 @_exported import TreeSitterTSXRunestone
 @_exported import TreeSitterTypeScriptRunestone
-@_exported import TreeSitterVerilogRunestone
 @_exported import TreeSitterXMLRunestone
 @_exported import TreeSitterYAMLRunestone
 @_exported import TreeSitterZigRunestone

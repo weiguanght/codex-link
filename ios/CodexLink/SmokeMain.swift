@@ -397,7 +397,7 @@ final class NativeSmoke: ObservableObject {
                 let syntaxCount = try NativeSyntaxSmoke.verify()
                 let terminal = NativeTerminalText.attributed("\u{1b}[31merror\u{1b}[0m ok \u{1b}]8;;https://example.invalid\u{7}link\u{1b}]8;;\u{7}")
                 try require(String(terminal.characters) == "error ok link" && terminal.runs.contains { $0.foregroundColor == .red } && terminal.runs.allSatisfy { $0.link == nil }, "Terminal output style or control stripping failed")
-                checks.append("\(syntaxCount) Runestone language fixtures + filename detection + embedded JavaScript + ANSI color/reset + OSC controls removed")
+                checks.append("\(syntaxCount) syntax fixtures + filename detection + embedded JavaScript + ANSI color/reset + OSC controls removed")
                 await browser.loadChanges(source: "unstaged")
                 try require(browser.changes?.files.contains { $0.path == "README.txt" && $0.untracked } == true, "Untracked file missing")
                 await browser.open("Sources/example.swift", diffSource: "unstaged")

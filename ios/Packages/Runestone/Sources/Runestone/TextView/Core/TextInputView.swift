@@ -1197,6 +1197,18 @@ final class TextInputView: UIView, UITextInput {
         }
     }
 
+    func updateSyntaxHighlights(_ highlights: [SyntaxHighlight]) {
+        guard let mode = languageMode as? ExternalSyntaxMode else { return }
+        mode.update(highlights)
+        // Edits discard the offsets immediately. Previously drawn lines may
+        // still contain the old colors even if the new result is empty.
+        for controller in lineControllerStorage {
+            controller.invalidateSyntaxHighlighting()
+        }
+        layoutManager.setNeedsLayout()
+        layoutManager.layoutIfNeeded()
+    }
+
     func clearSelection() {
         selectedRange = nil
     }

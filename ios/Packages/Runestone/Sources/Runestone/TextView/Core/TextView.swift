@@ -915,6 +915,12 @@ open class TextView: UIScrollView {
         if wasFolding { settleFoldingContentOffset(animated: false) }
     }
 
+    /// Updates colors in a state created with external syntax highlighting.
+    /// Pass sorted, non-overlapping UTF-16 ranges for the current text.
+    public func updateSyntaxHighlights(_ highlights: [SyntaxHighlight]) {
+        textInputView.updateSyntaxHighlights(highlights)
+    }
+
     /// Returns the row and column at the specified location in the text.
     /// Common usages of this includes showing the line and column that the caret is currently located at.
     /// - Parameter location: The location is relative to the first index in the string.

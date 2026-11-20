@@ -10,7 +10,7 @@ enum NativeSyntaxSmoke {
         let captures: [(String, String)]
     }
     private static let fixtures: [Fixture] = [
-        Fixture(language: "agda", source: "module Example where\n\n-- identity\nidentity : {A : Set} → A → A\nidentity x = x\n", captures: [("keyword", "module"), ("keyword", "where"), ("type.builtin", "Set"), ("comment", "-- identity")]),
+        Fixture(language: "agda", source: "module Example where\n\n-- identity\nidentity : {A : Set} → A → A\nidentity x = x\n", captures: [("keyword", "module"), ("keyword", "where"), ("keyword", "Set"), ("comment", "-- identity")]),
         Fixture(language: "bicep", source: "param name string = 'hello'\nvar count = 42\n// comment\n", captures: [("keyword", "param"), ("string", "'hello'"), ("number", "42")]),
         Fixture(language: "cmake", source: "cmake_minimum_required(VERSION 3.20)\nproject(Example)\nset(NAME \"hello\")\ncustom(value)\n# comment\n", captures: [("function.builtin", "project"), ("string", "\"hello\""), ("comment", "# comment")]),
         Fixture(language: "dart", source: "void main() { final count = 42; print(\"hello\"); }\n", captures: [("keyword", "final"), ("number", "42"), ("string", "\"hello\""), ("function.definition", "main"), ("function.call", "print")]),
@@ -26,7 +26,7 @@ enum NativeSyntaxSmoke {
         Fixture(language: "pascal", source: "program Example;\nvar value: Integer;\nbegin\n  value := 42;\n  WriteLn('hello');\nend.\n", captures: [("keyword", "begin"), ("number", "42"), ("string", "'hello'"), ("function.call", "WriteLn")]),
         Fixture(language: "proto", source: "syntax = \"proto3\";\nmessage Greeting { string name = 1; }\n// comment\n", captures: [("keyword.type", "message"), ("string", "\"proto3\""), ("number", "1"), ("comment", "// comment")]),
         Fixture(language: "scala", source: "object Main { val count = 42; val message = \"hello\" }\n", captures: [("keyword", "val"), ("number", "42"), ("string", "\"hello\"")]),
-        Fixture(language: "verilog", source: "// Combinational circuit\nmodule example(input wire a, output wire b);\n  parameter WIDTH = 8;\n  assign b = a;\n  initial $display(\"hello\");\nendmodule\n", captures: [("keyword", "module"), ("keyword", "endmodule"), ("keyword", "assign"), ("number", "8"), ("string", "\"hello\""), ("comment", "// Combinational circuit")]),
+        Fixture(language: "verilog", source: "// Combinational circuit\nmodule example(input wire a, output wire b);\n  parameter WIDTH = 8;\n  always_ff @(posedge a) count <= 8'hFF;\n  assign b = a;\n  initial $display(\"hello\");\nendmodule\n", captures: [("keyword", "module"), ("keyword", "endmodule"), ("keyword", "assign"), ("keyword", "always_ff"), ("number", "8'hFF"), ("number", "8"), ("string", "\"hello\""), ("comment", "// Combinational circuit")]),
         Fixture(language: "zig", source: "//! Module docs\nconst std = @import(\"std\");\n// Entry point\npub fn main() void {\n    const count: u32 = 42;\n    const ratio: f64 = 3.14;\n    _ = count;\n    _ = ratio;\n}\n", captures: [("keyword", "fn"), ("function", "main"), ("type.builtin", "u32"), ("number", "42"), ("number", "3.14"), ("string", "\"std\""), ("comment", "// Entry point"), ("comment.documentation", "//! Module docs")]),
         Fixture(language: "astro", source: "---\nconst title: string = \"Hello\";\n---\n<html><h1 class=\"hero\">{title}</h1><Card count={2} /><style>.hero {color: red}</style></html>\n", captures: [("tag", "h1"), ("attribute", "class"), ("string", "hero"), ("punctuation.bracket", "{")]),
         Fixture(language: "bash", source: "#!/usr/bin/env bash\nset -euo pipefail\nname=\"world\"\ngreet() {\n  local value=\"${name^^}\"\n  if [[ -n \"$value\" ]]; then\n    printf '%s\\n' \"$value\"\n  fi\n}\nfor file in *.txt; do greet \"$file\"; done\ncat <<EOF\nHello $name\nEOF\n# normal comment\n", captures: [("keyword", "if"), ("keyword", "for"), ("function", "greet"), ("property", "name"), ("string", "'%s\\n'"), ("comment", "# normal comment")]),
@@ -46,8 +46,8 @@ enum NativeSyntaxSmoke {
         Fixture(language: "json5", source: "// configuration\n{unquoted: \"value\", single: 'yes', list: [true, null, 0xFF, Infinity, NaN,],}\n", captures: [("comment", "// configuration"), ("property", "unquoted"), ("string", "'yes'"), ("number", "0xFF"), ("number", "Infinity"), ("constant.builtin", "true"), ("constant.builtin", "null")]),
         Fixture(language: "java", source: "// Guarded patterns and text blocks\nclass Example {\n String text = \"\"\"\nhello\n\"\"\";\n static int compute(Object value) { return switch (value) {\n case String s when !s.isEmpty() -> s.length(); default -> 42; }; }\n}\n", captures: [("keyword", "when"), ("keyword", "switch"), ("keyword", "return"), ("function.method", "compute"), ("number", "42"), ("string", "\"\"\"\nhello\n\"\"\"")]),
         Fixture(language: "javaScript", source: "/** Example function. */\nconst LIMIT = 42;\nclass Example { #value = 1; compute(value) { return `Hello ${value + LIMIT}`; } }\nfunction greet(value) { let console = value; return console; }\nconst pattern = /hello+/gi;\nconst markup = html`<b>Hello</b>`;\n", captures: [("keyword", "const"), ("keyword", "return"), ("function.definition", "greet"), ("function.method", "compute"), ("number", "42"), ("none", "${value + LIMIT}"), ("string", "`Hello ${value + LIMIT}`")]),
-        Fixture(language: "julia", source: "module Example\npublic greet\nstruct Person\n    name::String\nend\nfunction greet(person::Person, values::Vector{Int})\n    selected = values[begin:end]\n    message = \"Hello $(person.name)\"\n    kind = typeof(person)\n    return sum(x^2 for x in selected if x > 0), true, nothing\nend\n# normal comment\nend\n", captures: [("keyword.import", "public"), ("keyword.type", "struct"), ("keyword.function", "function"), ("keyword.return", "return"), ("type.builtin", "String"), ("constant.builtin", "true"), ("constant.builtin", "nothing"), ("variable.builtin", "begin"), ("function.builtin.julia", "typeof"), ("function.call", "sum")]),
-        Fixture(language: "latex", source: "\\documentclass{article}\n\\usepackage{amsmath}\n\\title{A study}\n\\begin{document}\n\\section{Introduction}\nSome \\emph{italic} and \\textbf{bold} text. See \\ref{sec:intro}.\n\\label{sec:intro}\n\\[ x^2 + y^2 = z^2 \\]\n% example\n\\begin{minted}{python}\nprint(\"hello\")\n\\end{minted}\n\\end{document}\n\\url{https://example.com}\n", captures: [("include", "\\documentclass"), ("text.title", "Introduction"), ("text.emphasis", "italic"), ("text.strong", "bold"), ("comment", "% example"), ("text.reference", "sec:intro"), ("text.uri", "https://example.com")]),
+        Fixture(language: "julia", source: "module Example\npublic greet\nstruct Person\n    name::String\nend\nfunction greet(person::Person, values::Vector{Int})\n    selected = values[begin:end]\n    message = \"Hello $(person.name)\"\n    kind = typeof(person)\n    return sum(x^2 for x in selected if x > 0), true, nothing\nend\n# normal comment\nend\n", captures: [("keyword", "struct"), ("keyword", "function"), ("keyword", "return"), ("constant", "true"), ("constant", "nothing"), ("keyword", "begin")]),
+        Fixture(language: "latex", source: "\\documentclass{article}\n\\usepackage{amsmath}\n\\title{A study}\n\\begin{document}\n\\section{Introduction}\nSome \\emph{italic} and \\textbf{bold} text. See \\ref{sec:intro}.\n\\label{sec:intro}\n\\[ x^2 + y^2 = z^2 \\]\n% example\n\\begin{minted}{python}\nprint(\"hello\")\n\\end{minted}\nPrice: 95\\% of total.\n\\begin{verbatim}a% b\\end{verbatim}\n\\end{document}\n\\url{https://example.com}\n", captures: [("keyword", "\\documentclass"), ("comment", "% example"), ("keyword", "\\%"), ("string", "a% b")]),
         Fixture(language: "lua", source: "-- Attributes, long strings, methods and builtins\nlocal LIMIT <const> = 42\nlocal message = [=[hello]=]\nlocal object = {}\nfunction object:compute(value)\n print(message)\n return value + LIMIT\nend\nobject:compute(1)\n", captures: [("keyword", "local"), ("keyword.return", "return"), ("function.method", "compute"), ("function.method.call", "compute"), ("function.builtin", "print"), ("number", "42"), ("string", "[=[hello]=]"), ("attribute", "const")]),
         Fixture(language: "markdown", source: "# Heading\n\n> A quote with **strong** text.\n\n- [x] task\n\n```python\nprint(\"hello\")\n```\n\n| Name | Count |\n| --- | --- |\n| Ada | 2 |\n", captures: [("text.title", "Heading"), ("punctuation.special", "#"), ("punctuation.delimiter", "```"), ("punctuation.special", "> "), ("punctuation.special", "- "), ("punctuation.special", "[x]")]),
         Fixture(language: "markdownInline", source: "Text *emphasis* and **strong**, `code`, [site](https://example.com), ![image](image.png), ~~old~~ and $x^2$.", captures: [("text.emphasis", "*emphasis*"), ("text.strong", "**strong**"), ("text.literal", "`code`"), ("text.uri", "https://example.com"), ("text.reference", "image"), ("punctuation.delimiter", ")"), ("text.strike", "~~old~~")]),
@@ -60,6 +60,7 @@ enum NativeSyntaxSmoke {
         Fixture(language: "ruby", source: "# Endless methods, interpolation and heredocs\nclass Example\n  LIMIT = 42\n  def compute(value) = \"hello #{value}\"\n  def message\n    <<~TEXT\nhello\nTEXT\n  end\nend\nexample = Example.new\nexample.compute(1)\n", captures: [("keyword", "class"), ("keyword", "def"), ("function.method", "compute"), ("number", "42"), ("constant", "LIMIT"), ("string", "\"hello #{value}\""), ("none", "#{value}")]),
         Fixture(language: "rust", source: "// Async functions and macro token trees\nconst LIMIT: usize = 42;\nasync fn compute(value: usize) -> usize {\n let message = r#\"hello\"#;\n println!(\"{}\", message);\n value + LIMIT\n}\n", captures: [("keyword", "async"), ("keyword", "fn"), ("function.definition", "compute"), ("string", "r#\"hello\"#"), ("number", "42"), ("constant", "LIMIT")]),
         Fixture(language: "scss", source: "$space: 1rem;\n// reusable layout\n@mixin card($gap) { padding: $gap; &:hover { color: #fff; } }\n.card { @include card($space); }\n", captures: [("variable", "$space"), ("keyword", "@mixin"), ("keyword", "@include"), ("comment", "// reusable layout"), ("property", "padding"), ("string.special", "#fff")]),
+        Fixture(language: "pgsql", source: "-- 中文😀\r\nCREATE FUNCTION f() RETURNS TEXT LANGUAGE plpgsql AS $$ BEGIN RETURN 'ok'; END; $$;\n", captures: [("comment", "-- 中文😀"), ("keyword", "CREATE"), ("keyword", "RETURN"), ("string", "'ok'")]),
         Fixture(language: "sql", source: "WITH ranked AS (\n  SELECT u.id, u.name, ROW_NUMBER() OVER (PARTITION BY u.team ORDER BY u.score DESC) AS rank\n  FROM users AS u WHERE u.active = TRUE AND u.score >= 1.5\n)\nSELECT id, name FROM ranked WHERE rank = 1 ORDER BY name;\nCREATE TABLE events (id BIGINT PRIMARY KEY, payload JSONB, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);\n-- normal comment\nSELECT 1e3, '123', 42;\n", captures: [("keyword", "SELECT"), ("keyword", "FROM"), ("keyword", "WHERE"), ("constant.builtin", "TRUE"), ("number.float", "1.5"), ("comment", "-- normal comment"), ("number.float", "1e3"), ("number.integer", "42"), ("string", "'123'"), ("function.call", "ROW_NUMBER")]),
         Fixture(language: "svelte", source: "<script lang=\"ts\" type=\"text/javascript\">let count: number = 1;</script>\n<style lang=\"scss\">$color: red; p { color: $color; }</style>\n{#snippet greeting(name)}<p class=\"greeting\">Hello {name}</p>{/snippet}\n{@render greeting(\"Ada\")}\n{#if count > 0}<strong>Active</strong>{:else}<em>Empty</em>{/if}\n", captures: [("keyword", "snippet"), ("keyword", "render"), ("function", "greeting"), ("keyword.conditional", "if"), ("tag", "p"), ("string", "\"greeting\""), ("text.strong", "Active")]),
         Fixture(language: "swift", source: "// Swift 6 isolation and ordinary syntax\nnonisolated(unsafe) var cache: Int = 0\nstruct Example {\n var value: Int = 42\n func compute(_ input: Int) async -> String {\n   let greeting = \"hello\"\n   return greeting\n }\n}\n", captures: [("keyword", "var"), ("keyword.function", "func"), ("keyword.coroutine", "async"), ("function.method", "compute"), ("keyword.return", "return"), ("string", "hello"), ("number", "42"), ("keyword.modifier", "nonisolated(unsafe)")]),
@@ -86,27 +87,28 @@ enum NativeSyntaxSmoke {
             throw LinkError.message("Language fixture coverage missing: " + Set(NativeCodeLanguages.supportedNames).subtracting(tested).sorted().joined(separator: ", "))
         }
         for fixture in fixtures {
-            guard let language = NativeCodeLanguages.language(fixture.language), language.highlightsQuery != nil else {
+            let lexical = NativeCodeLanguages.tokenizer(fixture.language) != nil
+            guard lexical || NativeCodeLanguages.language(fixture.language)?.highlightsQuery != nil else {
                 failures.append("Missing grammar: " + fixture.language); continue
             }
-            let highlighter = StringSyntaxHighlighter(theme: theme, language: language, languageProvider: NativeCodeLanguageProvider())
-            let result = highlighter.syntaxHighlight(fixture.source)
+            let result = NativeSyntaxHighlight.native(fixture.source, language: fixture.language, theme: theme)
             guard result.string == fixture.source else { throw LinkError.message("Syntax highlighting changed text: " + fixture.language) }
-            guard let sample = fixture.captures.first(where: { theme.textColor(for: $0.0) != nil }) else {
+            let samples = fixture.captures.filter { theme.textColor(for: $0.0) != nil }
+            guard let first = samples.first else {
                 failures.append("Missing colored fixture: " + fixture.language); continue
             }
-            let source = fixture.source as NSString
-            var search = NSRange(location: 0, length: source.length)
-            var matched = false
-            while search.length > 0 {
-                let range = source.range(of: sample.1, range: search)
-                if range.location == NSNotFound { break }
-                if let color = result.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? UIColor,
-                   color.isEqual(theme.textColor(for: sample.0)) { matched = true; break }
-                search = NSRange(location: NSMaxRange(range), length: source.length - NSMaxRange(range))
-            }
-            guard matched else {
-                failures.append("Uncolored syntax: " + fixture.language + " / " + sample.1); continue
+            for sample in lexical ? samples : [first] {
+                let source = fixture.source as NSString
+                var search = NSRange(location: 0, length: source.length)
+                var matched = false
+                while search.length > 0 {
+                    let range = source.range(of: sample.1, range: search)
+                    if range.location == NSNotFound { break }
+                    if let color = result.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? UIColor,
+                       color.isEqual(theme.textColor(for: sample.0)) { matched = true; break }
+                    search = NSRange(location: NSMaxRange(range), length: source.length - NSMaxRange(range))
+                }
+                if !matched { failures.append("Uncolored syntax: " + fixture.language + " / " + sample.1) }
             }
         }
         if !failures.isEmpty { throw LinkError.message(failures.joined(separator: "; ")) }
@@ -115,7 +117,8 @@ enum NativeSyntaxSmoke {
             ("go.mod", "gomod"), ("build/CMakeLists.txt", "cmake"), ("Dockerfile.dev", "dockerfile"),
             (".env.local", "bash"), ("Gemfile", "ruby"), ("config.jsonc", "json5"), ("Info.plist", "xml"),
             ("Component.jsx", "jsx"), ("Component.tsx", "tsx"), ("c++", "cpp"), ("c#", "csharp"),
-            ("config.toml", "toml"), ("unknown.bin", "text")
+            ("config.toml", "toml"), ("unknown.bin", "text"), ("controller.svh", "verilog"), ("chapter.sty", "latex"),
+            ("library.mli", "ocaml_interface"), ("postgresql", "pgsql")
         ] {
             guard NativeCodeLanguages.name(hint) == expected else { throw LinkError.message("Wrong grammar: " + hint) }
         }
@@ -139,6 +142,7 @@ struct NativeSyntaxSmokeApp: App {
 private struct NativeSyntaxSmokeScreen: View {
     @State private var content = "# test config\nmodel_reasoning_effort = \"high\"\nlong_value = \"" + String(repeating: "long-value-", count: 32) + "\"\n"
     @State private var result = "Testing syntax…"
+    @State private var language = "toml"
     @State private var running = false
     @State private var sends = 0
     var body: some View {
@@ -146,7 +150,7 @@ private struct NativeSyntaxSmokeScreen: View {
             Text(result)
             NativeSendButton(enabled: true, allowsModeSelection: running, onSend: { sends += 1 }, onChooseMode: {})
                 .frame(width: 44, height: 44)
-            NativeCodeView(text: $content, language: "toml", editable: true, wrapsLines: false,
+            NativeCodeView(text: $content, language: language, editable: true, wrapsLines: false,
                            identifier: "native.settings.advanced.editor")
         }.task { await run() }
     }
@@ -166,6 +170,23 @@ private struct NativeSyntaxSmokeScreen: View {
             try await Task.sleep(nanoseconds: 100_000_000)
             guard content == before + "# edited\n" else { throw LinkError.message("Configuration editor did not update its draft") }
             checks.append("TOML editor + horizontal scrolling + line numbers + editable binding")
+            language = "example.sql"
+            content = "-- 中文😀\nSELECT 42 AS value;\n"
+            let sql = try await findEditor()
+            let offset = (sql.text as NSString).range(of: "42").location
+            sql.selectedRange = NSRange(location: offset, length: 2)
+            sql.insertText("'123'")
+            try await Task.sleep(nanoseconds: 450_000_000)
+            guard content == "-- 中文😀\nSELECT '123' AS value;\n",
+                  sql.selectedRange == NSRange(location: offset + 5, length: 0), sql.undoManager?.canUndo == true else {
+                throw LinkError.message("Lexical editor lost the draft, caret or undo after recoloring")
+            }
+            sql.undoManager?.undo()
+            try await Task.sleep(nanoseconds: 450_000_000)
+            guard content == "-- 中文😀\nSELECT 42 AS value;\n" else {
+                throw LinkError.message("Lexical editor could not undo the edit")
+            }
+            checks.append("Native SQL editor Unicode edits, recoloring, caret and undo")
             for active in [false, true] {
                 running = active
                 try await Task.sleep(nanoseconds: 100_000_000)

@@ -1,6 +1,6 @@
 import Foundation
 
-final class PlainTextInternalLanguageMode: InternalLanguageMode {
+class PlainTextInternalLanguageMode: InternalLanguageMode {
     func parse(_ text: NSString) {}
 
     func parse(_ text: NSString, completion: @escaping ((Bool) -> Void)) {

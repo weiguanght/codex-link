@@ -1,5 +1,13 @@
 # 验证记录
 
+## iOS 轻量语法高亮（2026-11-20）
+
+- 11 个 Tree-sitter 语法目标改用轻量分词，删除 293.6 MiB 的生成解析器源码。Highlight.js 和 Prism 的离线 JavaScript 资源合计 179.9 KiB。替换范围和编辑功能差异见 [语法高亮](docs/syntax-highlighting.md)。
+- 同一构建脚本生成的 TrollStore IPA 从 12.0 MiB 降至 7.5 MiB，解包体积从 111.7 MiB 降至 52.8 MiB。
+- Python 测试 174 项通过，见 `build/lightweight-syntax/python.log`。arm64 Release、IPA 归档、TrollStore 签名和 SHA-256 校验通过，见 `build/lightweight-syntax/release-final.log`、`build/SHA256SUMS.txt`。
+- iOS 模拟器 smoke 26 项通过，定向 smoke 覆盖 60 种高亮模式和 SQL 编辑撤销。截图确认撤销后无需滚动即可恢复着色。日志和截图见 `build/lightweight-syntax/full-smoke.log`、`build/lightweight-syntax/syntax-smoke-final.log` 和 `build/lightweight-syntax/sql-editor-final.png`。
+- 安装包位于 `build/codex-link-0.1.0-TrollStore.ipa`，覆盖安装后启用新版高亮。
+
 ## 新版桌面共用本地 App Server（2026-11-20）
 
 - 在 Mac 上用独立 Codex 数据目录启动 Intel 桌面 `26.1117.31558` 与随带的 `0.171.0-alpha.13`，用本地测试模型服务完成对话。桌面与网关通过同一 Unix socket 握手。用配对后的 HTTPS 接口和实际桌面 UI 验证同一会话双向更新。

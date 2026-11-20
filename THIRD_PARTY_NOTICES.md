@@ -14,6 +14,15 @@
 - `web/link-presentation.js` 基于该版本的 `web/presentation.js` 改编，沿用其 MIT 许可证与版权；移除了思考摘要显示设置。
 - `web/link-timeline.js` 的分页投影与正文展开逻辑基于该版本的 `web/timeline.js` 改编，沿用其 MIT 许可证与版权；新增默认收起的工具活动分组。
 
+## iOS 代码高亮
+
+| 组件 | 版本 | 许可证路径 |
+| --- | --- | --- |
+| Highlight.js（核心与所选语言） | 11.12.0 | `ios/CodexLink/SyntaxAssets/HighlightJS-LICENSE`（BSD-3-Clause） |
+| Prism（核心与 Agda） | 1.30.0 | `ios/CodexLink/SyntaxAssets/Prism-LICENSE`（MIT） |
+
+`scripts/bundle-syntax.py` 从固定 SHA-256 的 npm 归档生成内置资源。Runestone、Tree-sitter 语法的来源记录与许可证位于 `ios/Packages/Runestone/`。
+
 ## 随网页内置的组件
 
 | 组件 | 版本 | 许可证路径 |
