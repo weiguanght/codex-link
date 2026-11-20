@@ -10,6 +10,9 @@ PACKAGE="codex-link-$VERSION"
 python3 "$ROOT/scripts/make-icon.py"
 python3 "$ROOT/scripts/generate-project.py"
 mkdir -p "$ROOT/build"
+APP_OUTPUT="$ROOT/build/iphoneos/CodexLink.app"
+# Recreate the app bundle so removed package resources cannot survive an incremental build.
+rm -rf -- "$APP_OUTPUT"
 xcodebuild -project "$ROOT/ios/codex-link.xcodeproj" -target codex-link \
   -configuration Release -sdk iphoneos \
   CONFIGURATION_BUILD_DIR="$ROOT/build/iphoneos" \
@@ -18,7 +21,7 @@ xcodebuild -project "$ROOT/ios/codex-link.xcodeproj" -target codex-link \
 STAGE="$(mktemp -d "$ROOT/build/package.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
 mkdir "$STAGE/Payload"
-cp -R "$ROOT/build/iphoneos/CodexLink.app" "$STAGE/Payload/"
+cp -R "$APP_OUTPUT" "$STAGE/Payload/"
 package_ipa() {
   local flavor="$1"
   local output="$ROOT/build/$PACKAGE-$flavor.ipa"

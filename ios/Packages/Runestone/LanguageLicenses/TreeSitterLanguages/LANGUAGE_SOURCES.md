@@ -1,9 +1,10 @@
 # Language sources
 
 These records document the upstream revisions used to vendor generated
-parsers, scanners, and private headers. The entries for Agda, Elixir, Haskell,
-Julia, LaTeX, OCaml, OCamlInterface, Perl, Scala, SQL, and Verilog document
-previously bundled grammars. Public language headers only forward-declare `TSLanguage`. The upstream package
+parsers, scanners, and private headers. The entries for Agda, Bicep, Dart, Elixir,
+Elm, Haskell, Julia, LaTeX, OCaml, OCamlInterface, Pascal, Perl, R, Scala, SQL,
+Verilog, and Zig document previously bundled grammars. Public language headers
+only forward-declare `TSLanguage`. The upstream package
 uses Runestone's Tree-sitter 0.27.1 runtime; this application retains its pinned 0.25.3 runtime. Both support generated grammar ABIs 13–15.
 
 The linked JSON records retain parser and query provenance, local query

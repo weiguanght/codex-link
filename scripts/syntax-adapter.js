@@ -5,8 +5,15 @@ const scopes = {
     'literal': 'constant', 'atom': 'constant', 'symbol': 'constant',
     'regexp': 'string', 'subst': 'property', 'section': 'function',
     'name': 'function', 'title': 'function', 'macro': 'attribute',
-    'variable': 'property'
+    'variable': 'property',
+    'builtin': 'function', 'char': 'character', 'decorator': 'attribute', 'directive': 'attribute'
 };
+
+// Prism 1.30 predates these Bicep declarations and parameter-file keywords.
+Prism.languages.bicep.keyword = [
+    /\b(?:assert|extends|func|import|type|using)\b/,
+    Prism.languages.bicep.keyword
+];
 
 globalThis.codexLinkSyntaxRanges = function (code, language) {
     const ranges = [];
@@ -26,13 +33,14 @@ globalThis.codexLinkSyntaxRanges = function (code, language) {
         offset += text.length;
     }
 
-    if (language === 'agda') {
+    const grammar = Prism.languages[language];
+    if (grammar) {
         function walk(node, scope) {
             if (typeof node === 'string') append(node, scope);
             else if (Array.isArray(node)) node.forEach(child => walk(child, scope));
             else walk(node.content, node.type);
         }
-        walk(Prism.tokenize(code, Prism.languages.agda), null);
+        walk(Prism.tokenize(code, grammar), null);
     } else {
         const result = hljs.highlight(code, { language, ignoreIllegals: true });
         if (result.errorRaised) return [];

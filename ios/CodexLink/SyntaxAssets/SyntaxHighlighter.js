@@ -2607,6 +2607,795 @@ highlight.HighlightJS = highlight;
 highlight.default = highlight;
 return module.exports;
 })();
+hljs.registerLanguage("xml", (function () {
+const module = { exports: {} };
+/*
+Language: HTML, XML
+Website: https://www.w3.org/XML/
+Category: common, web
+Audit: 2020
+*/
+
+/** @type LanguageFn */
+function xml(hljs) {
+  const regex = hljs.regex;
+  // XML names can have the following additional letters: https://www.w3.org/TR/xml/#NT-NameChar
+  // OTHER_NAME_CHARS = /[:\-.0-9\u00B7\u0300-\u036F\u203F-\u2040]/;
+  // Element names start with NAME_START_CHAR followed by optional other Unicode letters, ASCII digits, hyphens, underscores, and periods
+  // const TAG_NAME_RE = regex.concat(/[A-Z_a-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]/, regex.optional(/[A-Z_a-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\-.0-9\u00B7\u0300-\u036F\u203F-\u2040]*:/), /[A-Z_a-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\-.0-9\u00B7\u0300-\u036F\u203F-\u2040]*/);;
+  // const XML_IDENT_RE = /[A-Z_a-z:\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\-.0-9\u00B7\u0300-\u036F\u203F-\u2040]+/;
+  // const TAG_NAME_RE = regex.concat(/[A-Z_a-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]/, regex.optional(/[A-Z_a-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\-.0-9\u00B7\u0300-\u036F\u203F-\u2040]*:/), /[A-Z_a-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\-.0-9\u00B7\u0300-\u036F\u203F-\u2040]*/);
+  // however, to cater for performance and more Unicode support rely simply on the Unicode letter class
+  const TAG_NAME_RE = regex.concat(/[\p{L}_]/u, regex.optional(/[\p{L}0-9_.-]*:/u), /[\p{L}0-9_.-]*/u);
+  const XML_IDENT_RE = /[\p{L}0-9._:-]+/u;
+  const XML_ENTITIES = {
+    className: 'symbol',
+    begin: /&[a-z]+;|&#[0-9]+;|&#x[a-f0-9]+;/
+  };
+  const XML_META_KEYWORDS = {
+    begin: /\s/,
+    contains: [
+      {
+        className: 'keyword',
+        begin: /#?[a-z_][a-z1-9_-]+/,
+        illegal: /\n/
+      }
+    ]
+  };
+  const XML_META_PAR_KEYWORDS = hljs.inherit(XML_META_KEYWORDS, {
+    begin: /\(/,
+    end: /\)/
+  });
+  const APOS_META_STRING_MODE = hljs.inherit(hljs.APOS_STRING_MODE, { className: 'string' });
+  const QUOTE_META_STRING_MODE = hljs.inherit(hljs.QUOTE_STRING_MODE, { className: 'string' });
+  const TAG_INTERNALS = {
+    endsWithParent: true,
+    illegal: /</,
+    relevance: 0,
+    contains: [
+      {
+        className: 'attr',
+        begin: XML_IDENT_RE,
+        relevance: 0
+      },
+      {
+        begin: /=\s*/,
+        relevance: 0,
+        contains: [
+          {
+            className: 'string',
+            endsParent: true,
+            variants: [
+              {
+                begin: /"/,
+                end: /"/,
+                contains: [ XML_ENTITIES ]
+              },
+              {
+                begin: /'/,
+                end: /'/,
+                contains: [ XML_ENTITIES ]
+              },
+              { begin: /[^\s"'=<>`]+/ }
+            ]
+          }
+        ]
+      }
+    ]
+  };
+  return {
+    name: 'HTML, XML',
+    aliases: [
+      'html',
+      'xhtml',
+      'rss',
+      'atom',
+      'xjb',
+      'xsd',
+      'xsl',
+      'plist',
+      'wsf',
+      'svg'
+    ],
+    case_insensitive: true,
+    unicodeRegex: true,
+    contains: [
+      {
+        className: 'meta',
+        begin: /<![a-z]/,
+        end: />/,
+        relevance: 10,
+        contains: [
+          XML_META_KEYWORDS,
+          QUOTE_META_STRING_MODE,
+          APOS_META_STRING_MODE,
+          XML_META_PAR_KEYWORDS,
+          {
+            begin: /\[/,
+            end: /\]/,
+            contains: [
+              {
+                className: 'meta',
+                begin: /<![a-z]/,
+                end: />/,
+                contains: [
+                  XML_META_KEYWORDS,
+                  XML_META_PAR_KEYWORDS,
+                  QUOTE_META_STRING_MODE,
+                  APOS_META_STRING_MODE
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      hljs.COMMENT(
+        /<!--/,
+        /-->/,
+        { relevance: 10 }
+      ),
+      {
+        begin: /<!\[CDATA\[/,
+        end: /\]\]>/,
+        relevance: 10
+      },
+      XML_ENTITIES,
+      // xml processing instructions
+      {
+        className: 'meta',
+        end: /\?>/,
+        variants: [
+          {
+            begin: /<\?xml/,
+            relevance: 10,
+            contains: [
+              QUOTE_META_STRING_MODE
+            ]
+          },
+          {
+            begin: /<\?[a-z][a-z0-9]+/,
+          }
+        ]
+
+      },
+      {
+        className: 'tag',
+        /*
+        The lookahead pattern (?=...) ensures that 'begin' only matches
+        '<style' as a single word, followed by a whitespace or an
+        ending bracket.
+        */
+        begin: /<style(?=\s|>)/,
+        end: />/,
+        keywords: { name: 'style' },
+        contains: [ TAG_INTERNALS ],
+        starts: {
+          end: /<\/style>/,
+          returnEnd: true,
+          subLanguage: 'css'
+        }
+      },
+      {
+        className: 'tag',
+        // See the comment in the <style tag about the lookahead pattern
+        begin: /<script(?=\s|>)/,
+        end: />/,
+        keywords: { name: 'script' },
+        contains: [ TAG_INTERNALS ],
+        starts: {
+          end: /<\/script>/,
+          returnEnd: true,
+          subLanguage: 'javascript'
+        }
+      },
+      // we need this for now for jSX
+      {
+        className: 'tag',
+        begin: /<>|<\/>/
+      },
+      // open tag
+      {
+        className: 'tag',
+        begin: regex.concat(
+          /</,
+          regex.lookahead(regex.concat(
+            TAG_NAME_RE,
+            // <tag/>
+            // <tag>
+            // <tag ...
+            regex.either(/\/>/, />/, /\s/)
+          ))
+        ),
+        end: /\/?>/,
+        contains: [
+          {
+            className: 'name',
+            begin: TAG_NAME_RE,
+            relevance: 0,
+            starts: TAG_INTERNALS
+          }
+        ]
+      },
+      // close tag
+      {
+        className: 'tag',
+        begin: regex.concat(
+          /<\//,
+          regex.lookahead(regex.concat(
+            TAG_NAME_RE, />/
+          ))
+        ),
+        contains: [
+          {
+            className: 'name',
+            begin: TAG_NAME_RE,
+            relevance: 0
+          },
+          {
+            begin: />/,
+            relevance: 0,
+            endsParent: true
+          }
+        ]
+      }
+    ]
+  };
+}
+
+module.exports = xml;
+return module.exports;
+})());
+hljs.registerLanguage("markdown", (function () {
+const module = { exports: {} };
+/*
+Language: Markdown
+Requires: xml.js
+Author: John Crepezzi <john.crepezzi@gmail.com>
+Website: https://daringfireball.net/projects/markdown/
+Category: common, markup
+*/
+
+function markdown(hljs) {
+  const regex = hljs.regex;
+  const INLINE_HTML = {
+    begin: /<\/?[A-Za-z_]/,
+    end: '>',
+    subLanguage: 'xml',
+    relevance: 0
+  };
+  // https://spec.commonmark.org/0.31.2/#thematic-breaks
+  // three or more `-`, `*` or `_`, all the same character, optionally
+  // separated and followed by spaces or tabs, and nothing else on the line
+  const HORIZONTAL_RULE = { match: /^ {0,3}([-*_])[ \t]*(?:\1[ \t]*){2,}$/ };
+  const CODE = {
+    className: 'code',
+    variants: [
+      // TODO: fix to allow these to work with sublanguage also
+      { begin: '(`{3,})[^`](.|\\n)*?\\1`*[ ]*' },
+      { begin: '(~{3,})[^~](.|\\n)*?\\1~*[ ]*' },
+      // needed to allow markdown as a sublanguage to work
+      {
+        begin: '```',
+        end: '```+[ ]*$'
+      },
+      {
+        begin: '~~~',
+        end: '~~~+[ ]*$'
+      },
+      { begin: '`.+?`' },
+      {
+        begin: '(?=^( {4}|\\t))',
+        // use contains to gobble up multiple lines to allow the block to be whatever size
+        // but only have a single open/close tag vs one per line
+        contains: [
+          {
+            begin: '^( {4}|\\t)',
+            end: '(\\n)$'
+          }
+        ],
+        relevance: 0
+      }
+    ]
+  };
+  const LIST = {
+    className: 'bullet',
+    begin: '^[ \t]*([*+-]|(\\d+\\.))(?=\\s+)',
+    end: '\\s+',
+    excludeEnd: true
+  };
+  const LINK_REFERENCE = {
+    begin: /^\[[^\n]+\]:/,
+    returnBegin: true,
+    contains: [
+      {
+        className: 'symbol',
+        begin: /\[/,
+        end: /\]/,
+        excludeBegin: true,
+        excludeEnd: true
+      },
+      {
+        className: 'link',
+        begin: /:\s*/,
+        end: /$/,
+        excludeBegin: true
+      }
+    ]
+  };
+  const URL_SCHEME = /[A-Za-z][A-Za-z0-9+.-]*/;
+  const LINK = {
+    variants: [
+      // too much like nested array access in so many languages
+      // to have any real relevance
+      {
+        begin: /\[.+?\]\[.*?\]/,
+        relevance: 0
+      },
+      // popular internet URLs
+      {
+        begin: /\[.+?\]\(((data|javascript|mailto):|(?:http|ftp)s?:\/\/).*?\)/,
+        relevance: 2
+      },
+      {
+        begin: regex.concat(/\[.+?\]\(/, URL_SCHEME, /:\/\/.*?\)/),
+        relevance: 2
+      },
+      // relative urls
+      {
+        begin: /\[.+?\]\([./?&#].*?\)/,
+        relevance: 1
+      },
+      // whatever else, lower relevance (might not be a link at all)
+      {
+        begin: /\[.*?\]\(.*?\)/,
+        relevance: 0
+      }
+    ],
+    returnBegin: true,
+    contains: [
+      {
+        // empty strings for alt or link text
+        match: /\[(?=\])/ },
+      {
+        className: 'string',
+        relevance: 0,
+        begin: '\\[',
+        end: '\\]',
+        excludeBegin: true,
+        returnEnd: true
+      },
+      {
+        className: 'link',
+        relevance: 0,
+        begin: '\\]\\(',
+        end: '\\)',
+        excludeBegin: true,
+        excludeEnd: true
+      },
+      {
+        className: 'symbol',
+        relevance: 0,
+        begin: '\\]\\[',
+        end: '\\]',
+        excludeBegin: true,
+        excludeEnd: true
+      }
+    ]
+  };
+  const BOLD = {
+    className: 'strong',
+    contains: [], // defined later
+    variants: [
+      {
+        begin: /_{2}(?!\s)/,
+        end: /_{2}/
+      },
+      {
+        begin: /\*{2}(?!\s)/,
+        end: /\*{2}/
+      }
+    ]
+  };
+  const ITALIC = {
+    className: 'emphasis',
+    contains: [], // defined later
+    variants: [
+      {
+        begin: /\*(?![*\s])/,
+        end: /\*/
+      },
+      {
+        begin: /_(?![_\s])/,
+        end: /_/,
+        relevance: 0
+      }
+    ]
+  };
+
+  // 3 level deep nesting is not allowed because it would create confusion
+  // in cases like `***testing***` because where we don't know if the last
+  // `***` is starting a new bold/italic or finishing the last one
+  const BOLD_WITHOUT_ITALIC = hljs.inherit(BOLD, { contains: [] });
+  const ITALIC_WITHOUT_BOLD = hljs.inherit(ITALIC, { contains: [] });
+  BOLD.contains.push(ITALIC_WITHOUT_BOLD);
+  ITALIC.contains.push(BOLD_WITHOUT_ITALIC);
+
+  let CONTAINABLE = [
+    INLINE_HTML,
+    LINK
+  ];
+
+  [
+    BOLD,
+    ITALIC,
+    BOLD_WITHOUT_ITALIC,
+    ITALIC_WITHOUT_BOLD
+  ].forEach(m => {
+    m.contains = m.contains.concat(CONTAINABLE);
+  });
+
+  CONTAINABLE = CONTAINABLE.concat(BOLD, ITALIC);
+
+  const HEADER = {
+    className: 'section',
+    variants: [
+      {
+        begin: '^#{1,6}',
+        end: '$',
+        contains: CONTAINABLE
+      },
+      {
+        begin: '(?=^.+?\\n[=-]{2,}$)',
+        contains: [
+          { begin: '^[=-]*$' },
+          {
+            begin: '^',
+            end: "\\n",
+            contains: CONTAINABLE
+          }
+        ]
+      }
+    ]
+  };
+
+  const BLOCKQUOTE = {
+    className: 'quote',
+    begin: '^>\\s+',
+    contains: CONTAINABLE,
+    end: '$'
+  };
+
+  const ENTITY = {
+    //https://spec.commonmark.org/0.31.2/#entity-references
+    scope: 'literal',
+    match: /&([a-zA-Z0-9]+|#[0-9]{1,7}|#[Xx][0-9a-fA-F]{1,6});/
+  };
+
+  return {
+    name: 'Markdown',
+    aliases: [
+      'md',
+      'mkdown',
+      'mkd'
+    ],
+    contains: [
+      HEADER,
+      INLINE_HTML,
+      LIST,
+      // must come before BOLD/ITALIC so that a `***` or `___` thematic break
+      // isn't mistaken for the start of bold text
+      HORIZONTAL_RULE,
+      BOLD,
+      ITALIC,
+      BLOCKQUOTE,
+      CODE,
+      LINK,
+      LINK_REFERENCE,
+      ENTITY
+    ]
+  };
+}
+
+module.exports = markdown;
+return module.exports;
+})());
+hljs.registerLanguage("dart", (function () {
+const module = { exports: {} };
+/*
+Language: Dart
+Requires: markdown.js
+Author: Maxim Dikun <dikmax@gmail.com>
+Description: Dart a modern, object-oriented language developed by Google. For more information see https://www.dartlang.org/
+Website: https://dart.dev
+Category: scripting
+*/
+
+/** @type LanguageFn */
+function dart(hljs) {
+
+  const regex = hljs.regex;
+
+  const SUBST = {
+    className: 'subst',
+    variants: [ { begin: '\\$[A-Za-z0-9_]+' } ]
+  };
+
+  const BRACED_SUBST = {
+    className: 'subst',
+    variants: [
+      {
+        begin: /\$\{/,
+        end: /\}/
+      }
+    ],
+    keywords: 'true false null this is new super'
+  };
+
+  const NUMBER = {
+    className: 'number',
+    relevance: 0,
+    variants: [
+      { match: /\b[0-9][0-9_]*(\.[0-9][0-9_]*)?([eE][+-]?[0-9][0-9_]*)?\b/ },
+      { match: /\b0[xX][0-9A-Fa-f][0-9A-Fa-f_]*\b/ }
+    ]
+  };
+
+  const STRING = {
+    className: 'string',
+    variants: [
+      {
+        begin: 'r\'\'\'',
+        end: '\'\'\''
+      },
+      {
+        begin: 'r"""',
+        end: '"""'
+      },
+      {
+        begin: 'r\'',
+        end: '\'',
+        illegal: '\\n'
+      },
+      {
+        begin: 'r"',
+        end: '"',
+        illegal: '\\n'
+      },
+      {
+        begin: '\'\'\'',
+        end: '\'\'\'',
+        contains: [
+          hljs.BACKSLASH_ESCAPE,
+          SUBST,
+          BRACED_SUBST
+        ]
+      },
+      {
+        begin: '"""',
+        end: '"""',
+        contains: [
+          hljs.BACKSLASH_ESCAPE,
+          SUBST,
+          BRACED_SUBST
+        ]
+      },
+      {
+        begin: '\'',
+        end: '\'',
+        illegal: '\\n',
+        contains: [
+          hljs.BACKSLASH_ESCAPE,
+          SUBST,
+          BRACED_SUBST
+        ]
+      },
+      {
+        begin: '"',
+        end: '"',
+        illegal: '\\n',
+        contains: [
+          hljs.BACKSLASH_ESCAPE,
+          SUBST,
+          BRACED_SUBST
+        ]
+      }
+    ]
+  };
+  BRACED_SUBST.contains = [
+    NUMBER,
+    STRING
+  ];
+
+  const BUILT_IN_TYPES = [
+    // dart:core
+    'Comparable',
+    'DateTime',
+    'Duration',
+    'Function',
+    'Iterable',
+    'Iterator',
+    'List',
+    'Map',
+    'Match',
+    'Object',
+    'Pattern',
+    'RegExp',
+    'Set',
+    'Stopwatch',
+    'String',
+    'StringBuffer',
+    'StringSink',
+    'Symbol',
+    'Type',
+    'Uri',
+    'bool',
+    'double',
+    'int',
+    'num',
+    // dart:html
+    'Element',
+    'ElementList'
+  ];
+  const NULLABLE_BUILT_IN_TYPES = BUILT_IN_TYPES.map((e) => `${e}?`);
+
+  const BASIC_KEYWORDS = [
+    "abstract",
+    "as",
+    "assert",
+    "async",
+    "await",
+    "base",
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "covariant",
+    "default",
+    "deferred",
+    "do",
+    "dynamic",
+    "else",
+    "enum",
+    "export",
+    "extends",
+    "extension",
+    "external",
+    "factory",
+    "false",
+    "final",
+    "finally",
+    "for",
+    "Function",
+    "get",
+    "hide",
+    "if",
+    "implements",
+    "import",
+    "in",
+    "interface",
+    "is",
+    "late",
+    "library",
+    "mixin",
+    "new",
+    "null",
+    "on",
+    "operator",
+    "part",
+    "required",
+    "rethrow",
+    "return",
+    "sealed",
+    "set",
+    "show",
+    "static",
+    "super",
+    "switch",
+    "sync",
+    "this",
+    "throw",
+    "true",
+    "try",
+    "typedef",
+    "var",
+    "void",
+    "when",
+    "while",
+    "with",
+    "yield"
+  ];
+
+  const KEYWORDS = {
+    keyword: BASIC_KEYWORDS,
+    built_in:
+      BUILT_IN_TYPES
+        .concat(NULLABLE_BUILT_IN_TYPES)
+        .concat([
+          // dart:core
+          'Never',
+          'Null',
+          'dynamic',
+          'print',
+          // dart:html
+          'document',
+          'querySelector',
+          'querySelectorAll',
+          'window'
+        ]),
+    $pattern: /[A-Za-z][A-Za-z0-9_]*\??/
+  };
+
+  const CLASS_NAME_RE = regex.concat(
+    /\b_?/,
+    regex.either(
+      /(?:[A-Z]+[a-z0-9]+)+/,
+      /(?:[A-Z]+[a-z0-9]+)+[A-Z]+/
+    ),
+    /(?![A-Za-z0-9_])/
+  );
+
+  const CLASS_REFERENCE = {
+    match: CLASS_NAME_RE,
+    scope: "title.class"
+  };
+
+  const FUNCTION_REFERENCE = {
+    match: /\b(?!(?:assert|catch|for|if|switch|while)\b)[a-z_][A-Za-z0-9_]*(?=\()/,
+    scope: "title.function"
+  };
+
+  return {
+    name: 'Dart',
+    keywords: KEYWORDS,
+    contains: [
+      STRING,
+      hljs.COMMENT(
+        /\/\*\*(?!\/)/,
+        /\*\//,
+        {
+          subLanguage: 'markdown',
+          relevance: 0
+        }
+      ),
+      hljs.COMMENT(
+        /\/{3,} ?/,
+        /$/, { contains: [
+          {
+            subLanguage: 'markdown',
+            begin: '.',
+            end: '$',
+            relevance: 0
+          }
+        ] }
+      ),
+      hljs.C_LINE_COMMENT_MODE,
+      hljs.C_BLOCK_COMMENT_MODE,
+      {
+        className: 'class',
+        beginKeywords: 'class interface',
+        end: /\{/,
+        excludeEnd: true,
+        contains: [
+          { beginKeywords: 'extends implements' },
+          hljs.UNDERSCORE_TITLE_MODE
+        ]
+      },
+      CLASS_REFERENCE,
+      FUNCTION_REFERENCE,
+      NUMBER,
+      {
+        className: 'meta',
+        begin: '@[A-Za-z]+'
+      }
+    ]
+  };
+}
+
+module.exports = dart;
+return module.exports;
+})());
 hljs.registerLanguage("elixir", (function () {
 const module = { exports: {} };
 /*
@@ -2895,6 +3684,153 @@ function elixir(hljs) {
 }
 
 module.exports = elixir;
+return module.exports;
+})());
+hljs.registerLanguage("elm", (function () {
+const module = { exports: {} };
+/*
+Language: Elm
+Author: Janis Voigtlaender <janis.voigtlaender@gmail.com>
+Website: https://elm-lang.org
+Category: functional
+*/
+
+/** @type LanguageFn */
+function elm(hljs) {
+  const COMMENT = { variants: [
+    hljs.COMMENT('--', '$'),
+    hljs.COMMENT(
+      /\{-/,
+      /-\}/,
+      { contains: [ 'self' ] }
+    )
+  ] };
+
+  const CONSTRUCTOR = {
+    className: 'type',
+    begin: '\\b[A-Z][\\w\']*', // TODO: other constructors (built-in, infix).
+    relevance: 0
+  };
+
+  const LIST = {
+    begin: '\\(',
+    end: '\\)',
+    illegal: '"',
+    contains: [
+      {
+        className: 'type',
+        begin: '\\b[A-Z][\\w]*(\\((\\.\\.|,|\\w+)\\))?'
+      },
+      COMMENT
+    ]
+  };
+
+  const RECORD = {
+    begin: /\{/,
+    end: /\}/,
+    contains: LIST.contains
+  };
+
+  const CHARACTER = {
+    className: 'string',
+    begin: '\'\\\\?.',
+    end: '\'',
+    illegal: '.'
+  };
+
+  const KEYWORDS = [
+    "let",
+    "in",
+    "if",
+    "then",
+    "else",
+    "case",
+    "of",
+    "where",
+    "module",
+    "import",
+    "exposing",
+    "type",
+    "alias",
+    "as",
+    "infix",
+    "infixl",
+    "infixr",
+    "port",
+    "effect",
+    "command",
+    "subscription"
+  ];
+
+  return {
+    name: 'Elm',
+    keywords: KEYWORDS,
+    contains: [
+
+      // Top-level constructions.
+
+      {
+        beginKeywords: 'port effect module',
+        end: 'exposing',
+        keywords: 'port effect module where command subscription exposing',
+        contains: [
+          LIST,
+          COMMENT
+        ],
+        illegal: '\\W\\.|;'
+      },
+      {
+        begin: 'import',
+        end: '$',
+        keywords: 'import as exposing',
+        contains: [
+          LIST,
+          COMMENT
+        ],
+        illegal: '\\W\\.|;'
+      },
+      {
+        begin: 'type',
+        end: '$',
+        keywords: 'type alias',
+        contains: [
+          CONSTRUCTOR,
+          LIST,
+          RECORD,
+          COMMENT
+        ]
+      },
+      {
+        beginKeywords: 'infix infixl infixr',
+        end: '$',
+        contains: [
+          hljs.C_NUMBER_MODE,
+          COMMENT
+        ]
+      },
+      {
+        begin: 'port',
+        end: '$',
+        keywords: 'port',
+        contains: [ COMMENT ]
+      },
+
+      // Literals and names.
+      CHARACTER,
+      hljs.QUOTE_STRING_MODE,
+      hljs.C_NUMBER_MODE,
+      CONSTRUCTOR,
+      hljs.inherit(hljs.TITLE_MODE, { begin: '^[_a-z][\\w\']*' }),
+      COMMENT,
+
+      { // No markup, relevance booster
+        begin: '->|<-' }
+    ],
+    illegal: /;/
+  };
+}
+
+module.exports = elm;
 return module.exports;
 })());
 hljs.registerLanguage("haskell", (function () {
@@ -4970,6 +5906,267 @@ function pgsql(hljs) {
 module.exports = pgsql;
 return module.exports;
 })());
+hljs.registerLanguage("r", (function () {
+const module = { exports: {} };
+/*
+Language: R
+Description: R is a free software environment for statistical computing and graphics.
+Author: Joe Cheng <joe@rstudio.org>
+Contributors: Konrad Rudolph <konrad.rudolph@gmail.com>
+Website: https://www.r-project.org
+Category: common,scientific
+*/
+
+/** @type LanguageFn */
+function r(hljs) {
+  const regex = hljs.regex;
+  // Identifiers in R cannot start with `_`, but they can start with `.` if it
+  // is not immediately followed by a digit.
+  // R also supports quoted identifiers, which are near-arbitrary sequences
+  // delimited by backticks (`…`), which may contain escape sequences. These are
+  // handled in a separate mode. See `test/markup/r/names.txt` for examples.
+  // FIXME: Support Unicode identifiers.
+  const IDENT_RE = /(?:(?:[a-zA-Z]|\.[._a-zA-Z])[._a-zA-Z0-9]*)|\.(?!\d)/;
+  const NUMBER_TYPES_RE = regex.either(
+    // Special case: only hexadecimal binary powers can contain fractions
+    /0[xX][0-9a-fA-F]+\.[0-9a-fA-F]*[pP][+-]?\d+i?/,
+    // Hexadecimal numbers without fraction and optional binary power
+    /0[xX][0-9a-fA-F]+(?:[pP][+-]?\d+)?[Li]?/,
+    // Decimal numbers
+    /(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?[Li]?/
+  );
+  const OPERATORS_RE = /[=!<>:]=|\|\||&&|:::?|<-|<<-|->>|->|\|>|[-+*\/?!$&|:<=>@^~]|\*\*/;
+  const PUNCTUATION_RE = regex.either(
+    /[()]/,
+    /[{}]/,
+    /\[\[/,
+    /[[\]]/,
+    /\\/,
+    /,/
+  );
+
+  return {
+    name: 'R',
+
+    keywords: {
+      $pattern: IDENT_RE,
+      keyword:
+        'function if in break next repeat else for while',
+      literal:
+        'NULL NA TRUE FALSE Inf NaN NA_integer_|10 NA_real_|10 '
+        + 'NA_character_|10 NA_complex_|10',
+      built_in:
+        // Builtin constants
+        'LETTERS letters month.abb month.name pi T F '
+        // Primitive functions
+        // These are all the functions in `base` that are implemented as a
+        // `.Primitive`, minus those functions that are also keywords.
+        + 'abs acos acosh all any anyNA Arg as.call as.character '
+        + 'as.complex as.double as.environment as.integer as.logical '
+        + 'as.null.default as.numeric as.raw asin asinh atan atanh attr '
+        + 'attributes baseenv browser c call ceiling class Conj cos cosh '
+        + 'cospi cummax cummin cumprod cumsum digamma dim dimnames '
+        + 'emptyenv exp expression floor forceAndCall gamma gc.time '
+        + 'globalenv Im interactive invisible is.array is.atomic is.call '
+        + 'is.character is.complex is.double is.environment is.expression '
+        + 'is.finite is.function is.infinite is.integer is.language '
+        + 'is.list is.logical is.matrix is.na is.name is.nan is.null '
+        + 'is.numeric is.object is.pairlist is.raw is.recursive is.single '
+        + 'is.symbol lazyLoadDBfetch length lgamma list log max min '
+        + 'missing Mod names nargs nzchar oldClass on.exit pos.to.env '
+        + 'proc.time prod quote range Re rep retracemem return round '
+        + 'seq_along seq_len seq.int sign signif sin sinh sinpi sqrt '
+        + 'standardGeneric substitute sum switch tan tanh tanpi tracemem '
+        + 'trigamma trunc unclass untracemem UseMethod xtfrm',
+    },
+
+    contains: [
+      // Roxygen comments
+      hljs.COMMENT(
+        /#'/,
+        /$/,
+        { contains: [
+          {
+            // Handle `@examples` separately to cause all subsequent code
+            // until the next `@`-tag on its own line to be kept as-is,
+            // preventing highlighting. This code is example R code, so nested
+            // doctags shouldn’t be treated as such. See
+            // `test/markup/r/roxygen.txt` for an example.
+            scope: 'doctag',
+            match: /@examples/,
+            starts: {
+              end: regex.lookahead(regex.either(
+                // end if another doc comment
+                /\n^#'\s*(?=@[a-zA-Z]+)/,
+                // or a line with no comment
+                /\n^(?!#')/
+              )),
+              endsParent: true
+            }
+          },
+          {
+            // Handle `@param` to highlight the parameter name following
+            // after.
+            scope: 'doctag',
+            begin: '@param',
+            end: /$/,
+            contains: [
+              {
+                scope: 'variable',
+                variants: [
+                  { match: IDENT_RE },
+                  { match: /`(?:\\.|[^`\\])+`/ }
+                ],
+                endsParent: true
+              }
+            ]
+          },
+          {
+            scope: 'doctag',
+            match: /@[a-zA-Z]+/
+          },
+          {
+            scope: 'keyword',
+            match: /\\[a-zA-Z]+/
+          }
+        ] }
+      ),
+
+      hljs.HASH_COMMENT_MODE,
+
+      {
+        scope: 'string',
+        contains: [ hljs.BACKSLASH_ESCAPE ],
+        variants: [
+          hljs.END_SAME_AS_BEGIN({
+            begin: /[rR]"(-*)\(/,
+            end: /\)(-*)"/
+          }),
+          hljs.END_SAME_AS_BEGIN({
+            begin: /[rR]"(-*)\{/,
+            end: /\}(-*)"/
+          }),
+          hljs.END_SAME_AS_BEGIN({
+            begin: /[rR]"(-*)\[/,
+            end: /\](-*)"/
+          }),
+          hljs.END_SAME_AS_BEGIN({
+            begin: /[rR]'(-*)\(/,
+            end: /\)(-*)'/
+          }),
+          hljs.END_SAME_AS_BEGIN({
+            begin: /[rR]'(-*)\{/,
+            end: /\}(-*)'/
+          }),
+          hljs.END_SAME_AS_BEGIN({
+            begin: /[rR]'(-*)\[/,
+            end: /\](-*)'/
+          }),
+          {
+            begin: '"',
+            end: '"',
+            relevance: 0
+          },
+          {
+            begin: "'",
+            end: "'",
+            relevance: 0
+          }
+        ],
+      },
+
+      // Matching numbers immediately following punctuation and operators is
+      // tricky since we need to look at the character ahead of a number to
+      // ensure the number is not part of an identifier, and we cannot use
+      // negative look-behind assertions. So instead we explicitly handle all
+      // possible combinations of (operator|punctuation), number.
+      // TODO: replace with negative look-behind when available
+      // { begin: /(?<![a-zA-Z0-9._])0[xX][0-9a-fA-F]+\.[0-9a-fA-F]*[pP][+-]?\d+i?/ },
+      // { begin: /(?<![a-zA-Z0-9._])0[xX][0-9a-fA-F]+([pP][+-]?\d+)?[Li]?/ },
+      // { begin: /(?<![a-zA-Z0-9._])(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?[Li]?/ }
+      {
+        relevance: 0,
+        variants: [
+          {
+            scope: {
+              1: 'operator',
+              2: 'number'
+            },
+            match: [
+              OPERATORS_RE,
+              NUMBER_TYPES_RE
+            ]
+          },
+          {
+            scope: {
+              1: 'operator',
+              2: 'number'
+            },
+            match: [
+              /%[^%]*%/,
+              NUMBER_TYPES_RE
+            ]
+          },
+          {
+            scope: {
+              1: 'punctuation',
+              2: 'number'
+            },
+            match: [
+              PUNCTUATION_RE,
+              NUMBER_TYPES_RE
+            ]
+          },
+          {
+            scope: { 2: 'number' },
+            match: [
+              /[^a-zA-Z0-9._]|^/, // not part of an identifier, or start of document
+              NUMBER_TYPES_RE
+            ]
+          }
+        ]
+      },
+
+      // Operators/punctuation when they're not directly followed by numbers
+      {
+        // Relevance boost for the most common assignment form.
+        scope: { 3: 'operator' },
+        match: [
+          IDENT_RE,
+          /\s+/,
+          /<-/,
+          /\s+/
+        ]
+      },
+
+      {
+        scope: 'operator',
+        relevance: 0,
+        variants: [
+          { match: OPERATORS_RE },
+          { match: /%[^%]*%/ }
+        ]
+      },
+
+      {
+        scope: 'punctuation',
+        relevance: 0,
+        match: PUNCTUATION_RE
+      },
+
+      {
+        // Escaped identifier
+        begin: '`',
+        end: '`',
+        contains: [ { begin: /\\./ } ]
+      }
+    ]
+  };
+}
+
+module.exports = r;
+return module.exports;
+})());
 hljs.registerLanguage("scala", (function () {
 const module = { exports: {} };
 /*
@@ -6441,6 +7638,9 @@ return module.exports;
 })());
 var _self="undefined"!=typeof window?window:"undefined"!=typeof WorkerGlobalScope&&self instanceof WorkerGlobalScope?self:{},Prism=function(e){var n=/(?:^|\s)lang(?:uage)?-([\w-]+)(?=\s|$)/i,t=0,r={},a={manual:e.Prism&&e.Prism.manual,disableWorkerMessageHandler:e.Prism&&e.Prism.disableWorkerMessageHandler,util:{encode:function e(n){return n instanceof i?new i(n.type,e(n.content),n.alias):Array.isArray(n)?n.map(e):n.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/\u00a0/g," ")},type:function(e){return Object.prototype.toString.call(e).slice(8,-1)},objId:function(e){return e.__id||Object.defineProperty(e,"__id",{value:++t}),e.__id},clone:function e(n,t){var r,i;switch(t=t||{},a.util.type(n)){case"Object":if(i=a.util.objId(n),t[i])return t[i];for(var l in r={},t[i]=r,n)n.hasOwnProperty(l)&&(r[l]=e(n[l],t));return r;case"Array":return i=a.util.objId(n),t[i]?t[i]:(r=[],t[i]=r,n.forEach((function(n,a){r[a]=e(n,t)})),r);default:return n}},getLanguage:function(e){for(;e;){var t=n.exec(e.className);if(t)return t[1].toLowerCase();e=e.parentElement}return"none"},setLanguage:function(e,t){e.className=e.className.replace(RegExp(n,"gi"),""),e.classList.add("language-"+t)},currentScript:function(){if("undefined"==typeof document)return null;if(document.currentScript&&"SCRIPT"===document.currentScript.tagName)return document.currentScript;try{throw new Error}catch(r){var e=(/at [^(\r\n]*\((.*):[^:]+:[^:]+\)$/i.exec(r.stack)||[])[1];if(e){var n=document.getElementsByTagName("script");for(var t in n)if(n[t].src==e)return n[t]}return null}},isActive:function(e,n,t){for(var r="no-"+n;e;){var a=e.classList;if(a.contains(n))return!0;if(a.contains(r))return!1;e=e.parentElement}return!!t}},languages:{plain:r,plaintext:r,text:r,txt:r,extend:function(e,n){var t=a.util.clone(a.languages[e]);for(var r in n)t[r]=n[r];return t},insertBefore:function(e,n,t,r){var i=(r=r||a.languages)[e],l={};for(var o in i)if(i.hasOwnProperty(o)){if(o==n)for(var s in t)t.hasOwnProperty(s)&&(l[s]=t[s]);t.hasOwnProperty(o)||(l[o]=i[o])}var u=r[e];return r[e]=l,a.languages.DFS(a.languages,(function(n,t){t===u&&n!=e&&(this[n]=l)})),l},DFS:function e(n,t,r,i){i=i||{};var l=a.util.objId;for(var o in n)if(n.hasOwnProperty(o)){t.call(n,o,n[o],r||o);var s=n[o],u=a.util.type(s);"Object"!==u||i[l(s)]?"Array"!==u||i[l(s)]||(i[l(s)]=!0,e(s,t,o,i)):(i[l(s)]=!0,e(s,t,null,i))}}},plugins:{},highlightAll:function(e,n){a.highlightAllUnder(document,e,n)},highlightAllUnder:function(e,n,t){var r={callback:t,container:e,selector:'code[class*="language-"], [class*="language-"] code, code[class*="lang-"], [class*="lang-"] code'};a.hooks.run("before-highlightall",r),r.elements=Array.prototype.slice.apply(r.container.querySelectorAll(r.selector)),a.hooks.run("before-all-elements-highlight",r);for(var i,l=0;i=r.elements[l++];)a.highlightElement(i,!0===n,r.callback)},highlightElement:function(n,t,r){var i=a.util.getLanguage(n),l=a.languages[i];a.util.setLanguage(n,i);var o=n.parentElement;o&&"pre"===o.nodeName.toLowerCase()&&a.util.setLanguage(o,i);var s={element:n,language:i,grammar:l,code:n.textContent};function u(e){s.highlightedCode=e,a.hooks.run("before-insert",s),s.element.innerHTML=s.highlightedCode,a.hooks.run("after-highlight",s),a.hooks.run("complete",s),r&&r.call(s.element)}if(a.hooks.run("before-sanity-check",s),(o=s.element.parentElement)&&"pre"===o.nodeName.toLowerCase()&&!o.hasAttribute("tabindex")&&o.setAttribute("tabindex","0"),!s.code)return a.hooks.run("complete",s),void(r&&r.call(s.element));if(a.hooks.run("before-highlight",s),s.grammar)if(t&&e.Worker){var c=new Worker(a.filename);c.onmessage=function(e){u(e.data)},c.postMessage(JSON.stringify({language:s.language,code:s.code,immediateClose:!0}))}else u(a.highlight(s.code,s.grammar,s.language));else u(a.util.encode(s.code))},highlight:function(e,n,t){var r={code:e,grammar:n,language:t};if(a.hooks.run("before-tokenize",r),!r.grammar)throw new Error('The language "'+r.language+'" has no grammar.');return r.tokens=a.tokenize(r.code,r.grammar),a.hooks.run("after-tokenize",r),i.stringify(a.util.encode(r.tokens),r.language)},tokenize:function(e,n){var t=n.rest;if(t){for(var r in t)n[r]=t[r];delete n.rest}var a=new s;return u(a,a.head,e),o(e,a,n,a.head,0),function(e){for(var n=[],t=e.head.next;t!==e.tail;)n.push(t.value),t=t.next;return n}(a)},hooks:{all:{},add:function(e,n){var t=a.hooks.all;t[e]=t[e]||[],t[e].push(n)},run:function(e,n){var t=a.hooks.all[e];if(t&&t.length)for(var r,i=0;r=t[i++];)r(n)}},Token:i};function i(e,n,t,r){this.type=e,this.content=n,this.alias=t,this.length=0|(r||"").length}function l(e,n,t,r){e.lastIndex=n;var a=e.exec(t);if(a&&r&&a[1]){var i=a[1].length;a.index+=i,a[0]=a[0].slice(i)}return a}function o(e,n,t,r,s,g){for(var f in t)if(t.hasOwnProperty(f)&&t[f]){var h=t[f];h=Array.isArray(h)?h:[h];for(var d=0;d<h.length;++d){if(g&&g.cause==f+","+d)return;var v=h[d],p=v.inside,m=!!v.lookbehind,y=!!v.greedy,k=v.alias;if(y&&!v.pattern.global){var x=v.pattern.toString().match(/[imsuy]*$/)[0];v.pattern=RegExp(v.pattern.source,x+"g")}for(var b=v.pattern||v,w=r.next,A=s;w!==n.tail&&!(g&&A>=g.reach);A+=w.value.length,w=w.next){var P=w.value;if(n.length>e.length)return;if(!(P instanceof i)){var E,S=1;if(y){if(!(E=l(b,A,e,m))||E.index>=e.length)break;var L=E.index,O=E.index+E[0].length,C=A;for(C+=w.value.length;L>=C;)C+=(w=w.next).value.length;if(A=C-=w.value.length,w.value instanceof i)continue;for(var j=w;j!==n.tail&&(C<O||"string"==typeof j.value);j=j.next)S++,C+=j.value.length;S--,P=e.slice(A,C),E.index-=A}else if(!(E=l(b,0,P,m)))continue;L=E.index;var N=E[0],_=P.slice(0,L),M=P.slice(L+N.length),W=A+P.length;g&&W>g.reach&&(g.reach=W);var I=w.prev;if(_&&(I=u(n,I,_),A+=_.length),c(n,I,S),w=u(n,I,new i(f,p?a.tokenize(N,p):N,k,N)),M&&u(n,w,M),S>1){var T={cause:f+","+d,reach:W};o(e,n,t,w.prev,A,T),g&&T.reach>g.reach&&(g.reach=T.reach)}}}}}}function s(){var e={value:null,prev:null,next:null},n={value:null,prev:e,next:null};e.next=n,this.head=e,this.tail=n,this.length=0}function u(e,n,t){var r=n.next,a={value:t,prev:n,next:r};return n.next=a,r.prev=a,e.length++,a}function c(e,n,t){for(var r=n.next,a=0;a<t&&r!==e.tail;a++)r=r.next;n.next=r,r.prev=n,e.length-=a}if(e.Prism=a,i.stringify=function e(n,t){if("string"==typeof n)return n;if(Array.isArray(n)){var r="";return n.forEach((function(n){r+=e(n,t)})),r}var i={type:n.type,content:e(n.content,t),tag:"span",classes:["token",n.type],attributes:{},language:t},l=n.alias;l&&(Array.isArray(l)?Array.prototype.push.apply(i.classes,l):i.classes.push(l)),a.hooks.run("wrap",i);var o="";for(var s in i.attributes)o+=" "+s+'="'+(i.attributes[s]||"").replace(/"/g,"&quot;")+'"';return"<"+i.tag+' class="'+i.classes.join(" ")+'"'+o+">"+i.content+"</"+i.tag+">"},!e.document)return e.addEventListener?(a.disableWorkerMessageHandler||e.addEventListener("message",(function(n){var t=JSON.parse(n.data),r=t.language,i=t.code,l=t.immediateClose;e.postMessage(a.highlight(i,a.languages[r],r)),l&&e.close()}),!1),a):a;var g=a.util.currentScript();function f(){a.manual||a.highlightAll()}if(g&&(a.filename=g.src,g.hasAttribute("data-manual")&&(a.manual=!0)),!a.manual){var h=document.readyState;"loading"===h||"interactive"===h&&g&&g.defer?document.addEventListener("DOMContentLoaded",f):window.requestAnimationFrame?window.requestAnimationFrame(f):window.setTimeout(f,16)}return a}(_self);"undefined"!=typeof module&&module.exports&&(module.exports=Prism),"undefined"!=typeof global&&(global.Prism=Prism);
 !function(t){t.languages.agda={comment:/\{-[\s\S]*?(?:-\}|$)|--.*/,string:{pattern:/"(?:\\(?:\r\n|[\s\S])|[^\\\r\n"])*"/,greedy:!0},punctuation:/[(){}⦃⦄.;@]/,"class-name":{pattern:/((?:data|record) +)\S+/,lookbehind:!0},function:{pattern:/(^[ \t]*)(?!\s)[^:\r\n]+(?=:)/m,lookbehind:!0},operator:{pattern:/(^\s*|\s)(?:[=|:∀→λ\\?_]|->)(?=\s)/,lookbehind:!0},keyword:/\b(?:Set|abstract|constructor|data|eta-equality|field|forall|hiding|import|in|inductive|infix|infixl|infixr|instance|let|macro|module|mutual|no-eta-equality|open|overlap|pattern|postulate|primitive|private|public|quote|quoteContext|quoteGoal|quoteTerm|record|renaming|rewrite|syntax|tactic|unquote|unquoteDecl|unquoteDef|using|variable|where|with)\b/}}(Prism);
+Prism.languages.bicep={comment:[{pattern:/(^|[^\\])\/\*[\s\S]*?(?:\*\/|$)/,lookbehind:!0,greedy:!0},{pattern:/(^|[^\\:])\/\/.*/,lookbehind:!0,greedy:!0}],property:[{pattern:/([\r\n][ \t]*)[a-z_]\w*(?=[ \t]*:)/i,lookbehind:!0},{pattern:/([\r\n][ \t]*)'(?:\\.|\$(?!\{)|[^'\\\r\n$])*'(?=[ \t]*:)/,lookbehind:!0,greedy:!0}],string:[{pattern:/'''[^'][\s\S]*?'''/,greedy:!0},{pattern:/(^|[^\\'])'(?:\\.|\$(?!\{)|[^'\\\r\n$])*'/,lookbehind:!0,greedy:!0}],"interpolated-string":{pattern:/(^|[^\\'])'(?:\\.|\$(?:(?!\{)|\{[^{}\r\n]*\})|[^'\\\r\n$])*'/,lookbehind:!0,greedy:!0,inside:{interpolation:{pattern:/\$\{[^{}\r\n]*\}/,inside:{expression:{pattern:/(^\$\{)[\s\S]+(?=\}$)/,lookbehind:!0},punctuation:/^\$\{|\}$/}},string:/[\s\S]+/}},datatype:{pattern:/(\b(?:output|param)\b[ \t]+\w+[ \t]+)\w+\b/,lookbehind:!0,alias:"class-name"},boolean:/\b(?:false|true)\b/,keyword:/\b(?:existing|for|if|in|module|null|output|param|resource|targetScope|var)\b/,decorator:/@\w+\b/,function:/\b[a-z_]\w*(?=[ \t]*\()/i,number:/(?:\b\d+(?:\.\d*)?|\B\.\d+)(?:E[+-]?\d+)?/i,operator:/--|\+\+|\*\*=?|=>|&&=?|\|\|=?|[!=]==|<<=?|>>>?=?|[-+*/%&|^!=<>]=?|\.{3}|\?\?=?|\?\.?|[~:]/,punctuation:/[{}[\];(),.:]/},Prism.languages.bicep["interpolated-string"].inside.interpolation.inside.expression.inside=Prism.languages.bicep;
+Prism.languages.pascal={directive:{pattern:/\{\$[\s\S]*?\}/,greedy:!0,alias:["marco","property"]},comment:{pattern:/\(\*[\s\S]*?\*\)|\{[\s\S]*?\}|\/\/.*/,greedy:!0},string:{pattern:/(?:'(?:''|[^'\r\n])*'(?!')|#[&$%]?[a-f\d]+)+|\^[a-z]/i,greedy:!0},asm:{pattern:/(\basm\b)[\s\S]+?(?=\bend\s*[;[])/i,lookbehind:!0,greedy:!0,inside:null},keyword:[{pattern:/(^|[^&])\b(?:absolute|array|asm|begin|case|const|constructor|destructor|do|downto|else|end|file|for|function|goto|if|implementation|inherited|inline|interface|label|nil|object|of|operator|packed|procedure|program|record|reintroduce|repeat|self|set|string|then|to|type|unit|until|uses|var|while|with)\b/i,lookbehind:!0},{pattern:/(^|[^&])\b(?:dispose|exit|false|new|true)\b/i,lookbehind:!0},{pattern:/(^|[^&])\b(?:class|dispinterface|except|exports|finalization|finally|initialization|inline|library|on|out|packed|property|raise|resourcestring|threadvar|try)\b/i,lookbehind:!0},{pattern:/(^|[^&])\b(?:absolute|abstract|alias|assembler|bitpacked|break|cdecl|continue|cppdecl|cvar|default|deprecated|dynamic|enumerator|experimental|export|external|far|far16|forward|generic|helper|implements|index|interrupt|iochecks|local|message|name|near|nodefault|noreturn|nostackframe|oldfpccall|otherwise|overload|override|pascal|platform|private|protected|public|published|read|register|reintroduce|result|safecall|saveregisters|softfloat|specialize|static|stdcall|stored|strict|unaligned|unimplemented|varargs|virtual|write)\b/i,lookbehind:!0}],number:[/(?:[&%]\d+|\$[a-f\d]+)/i,/\b\d+(?:\.\d+)?(?:e[+-]?\d+)?/i],operator:[/\.\.|\*\*|:=|<[<=>]?|>[>=]?|[+\-*\/]=?|[@^=]/,{pattern:/(^|[^&])\b(?:and|as|div|exclude|in|include|is|mod|not|or|shl|shr|xor)\b/,lookbehind:!0}],punctuation:/\(\.|\.\)|[()\[\]:;,.]/},Prism.languages.pascal.asm.inside=Prism.languages.extend("pascal",{asm:void 0,keyword:void 0,operator:void 0}),Prism.languages.objectpascal=Prism.languages.pascal;
+!function(e){function n(e){return function(){return e}}var r=/\b(?:align|allowzero|and|anyframe|anytype|asm|async|await|break|cancel|catch|comptime|const|continue|defer|else|enum|errdefer|error|export|extern|fn|for|if|inline|linksection|nakedcc|noalias|nosuspend|null|or|orelse|packed|promise|pub|resume|return|stdcallcc|struct|suspend|switch|test|threadlocal|try|undefined|union|unreachable|usingnamespace|var|volatile|while)\b/,a="\\b(?!"+r.source+")(?!\\d)\\w+\\b",o="align\\s*\\((?:[^()]|\\([^()]*\\))*\\)",s="(?!\\s)(?:!?\\s*(?:"+"(?:\\?|\\bpromise->|(?:\\[[^[\\]]*\\]|\\*(?!\\*)|\\*\\*)(?:\\s*<ALIGN>|\\s*const\\b|\\s*volatile\\b|\\s*allowzero\\b)*)".replace(/<ALIGN>/g,n(o))+"\\s*)*"+"(?:\\bpromise\\b|(?:\\berror\\.)?<ID>(?:\\.<ID>)*(?!\\s+<ID>))".replace(/<ID>/g,n(a))+")+";e.languages.zig={comment:[{pattern:/\/\/[/!].*/,alias:"doc-comment"},/\/{2}.*/],string:[{pattern:/(^|[^\\@])c?"(?:[^"\\\r\n]|\\.)*"/,lookbehind:!0,greedy:!0},{pattern:/([\r\n])([ \t]+c?\\{2}).*(?:(?:\r\n?|\n)\2.*)*/,lookbehind:!0,greedy:!0}],char:{pattern:/(^|[^\\])'(?:[^'\\\r\n]|[\uD800-\uDFFF]{2}|\\(?:.|x[a-fA-F\d]{2}|u\{[a-fA-F\d]{1,6}\}))'/,lookbehind:!0,greedy:!0},builtin:/\B@(?!\d)\w+(?=\s*\()/,label:{pattern:/(\b(?:break|continue)\s*:\s*)\w+\b|\b(?!\d)\w+\b(?=\s*:\s*(?:\{|while\b))/,lookbehind:!0},"class-name":[/\b(?!\d)\w+(?=\s*=\s*(?:(?:extern|packed)\s+)?(?:enum|struct|union)\s*[({])/,{pattern:RegExp("(:\\s*)<TYPE>(?=\\s*(?:<ALIGN>\\s*)?[=;,)])|<TYPE>(?=\\s*(?:<ALIGN>\\s*)?\\{)".replace(/<TYPE>/g,n(s)).replace(/<ALIGN>/g,n(o))),lookbehind:!0,inside:null},{pattern:RegExp("(\\)\\s*)<TYPE>(?=\\s*(?:<ALIGN>\\s*)?;)".replace(/<TYPE>/g,n(s)).replace(/<ALIGN>/g,n(o))),lookbehind:!0,inside:null}],"builtin-type":{pattern:/\b(?:anyerror|bool|c_u?(?:int|long|longlong|short)|c_longdouble|c_void|comptime_(?:float|int)|f(?:16|32|64|128)|[iu](?:8|16|32|64|128|size)|noreturn|type|void)\b/,alias:"keyword"},keyword:r,function:/\b(?!\d)\w+(?=\s*\()/,number:/\b(?:0b[01]+|0o[0-7]+|0x[a-fA-F\d]+(?:\.[a-fA-F\d]*)?(?:[pP][+-]?[a-fA-F\d]+)?|\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)\b/,boolean:/\b(?:false|true)\b/,operator:/\.[*?]|\.{2,3}|[-=]>|\*\*|\+\+|\|\||(?:<<|>>|[-+*]%|[-+*/%^&|<>!=])=?|[?~]/,punctuation:/[.:,;(){}[\]]/},e.languages.zig["class-name"].forEach((function(n){null===n.inside&&(n.inside=e.languages.zig)}))}(Prism);
 // Both engines produce token trees. Return UTF-16 ranges for UIKit, with
 // inner scopes overriding outer scopes and no HTML conversion.
 const scopes = {
@@ -6448,8 +7648,15 @@ const scopes = {
     'literal': 'constant', 'atom': 'constant', 'symbol': 'constant',
     'regexp': 'string', 'subst': 'property', 'section': 'function',
     'name': 'function', 'title': 'function', 'macro': 'attribute',
-    'variable': 'property'
+    'variable': 'property',
+    'builtin': 'function', 'char': 'character', 'decorator': 'attribute', 'directive': 'attribute'
 };
+
+// Prism 1.30 predates these Bicep declarations and parameter-file keywords.
+Prism.languages.bicep.keyword = [
+    /\b(?:assert|extends|func|import|type|using)\b/,
+    Prism.languages.bicep.keyword
+];
 
 globalThis.codexLinkSyntaxRanges = function (code, language) {
     const ranges = [];
@@ -6469,13 +7676,14 @@ globalThis.codexLinkSyntaxRanges = function (code, language) {
         offset += text.length;
     }
 
-    if (language === 'agda') {
+    const grammar = Prism.languages[language];
+    if (grammar) {
         function walk(node, scope) {
             if (typeof node === 'string') append(node, scope);
             else if (Array.isArray(node)) node.forEach(child => walk(child, scope));
             else walk(node.content, node.type);
         }
-        walk(Prism.tokenize(code, Prism.languages.agda), null);
+        walk(Prism.tokenize(code, grammar), null);
     } else {
         const result = hljs.highlight(code, { language, ignoreIllegals: true });
         if (result.errorRaised) return [];

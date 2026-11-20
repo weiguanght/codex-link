@@ -1,5 +1,10 @@
 # 验证记录
 
+## 1 MB 以上的冷门语法改用轻量高亮（2026-11-21）
+
+- Dart、Elm、R 改用 Highlight.js，Bicep、Pascal、Zig 改用 Prism。移除 21.9 MiB 的生成解析器源码。模拟器定向 smoke 验证了 60 种高亮模式，覆盖新替换语法的代表性 token、扩展名和 SQL 编辑撤销。日志见 `build/syntax-1mb/syntax-smoke.log`。
+- 正式构建从空的应用包开始生成资源。归档内已清除两轮移除的语法查询资源，arm64 构建、TrollStore 签名和 SHA-256 校验通过。与上一版相比，IPA 从 7.49 MiB 降至约 7.07 MiB，解包体积从 52.79 MiB 降至 49.36 MiB。构建日志见 `build/syntax-1mb/release-final.log`。
+
 ## iOS 轻量语法高亮（2026-11-20）
 
 - 11 个 Tree-sitter 语法目标改用轻量分词，删除 293.6 MiB 的生成解析器源码。Highlight.js 和 Prism 的离线 JavaScript 资源合计 179.9 KiB。替换范围和编辑功能差异见 [语法高亮](docs/syntax-highlighting.md)。

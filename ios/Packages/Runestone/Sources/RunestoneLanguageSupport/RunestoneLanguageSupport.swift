@@ -1,17 +1,14 @@
 // Re-export the Runestone integration for every bundled language.
 @_exported import TreeSitterAstroRunestone
 @_exported import TreeSitterBashRunestone
-@_exported import TreeSitterBicepRunestone
 @_exported import TreeSitterCMakeRunestone
 @_exported import TreeSitterCPPRunestone
 @_exported import TreeSitterCRunestone
 @_exported import TreeSitterCSSRunestone
 @_exported import TreeSitterCSharpRunestone
 @_exported import TreeSitterCommentRunestone
-@_exported import TreeSitterDartRunestone
 @_exported import TreeSitterDiffRunestone
 @_exported import TreeSitterDockerfileRunestone
-@_exported import TreeSitterElmRunestone
 @_exported import TreeSitterFishRunestone
 @_exported import TreeSitterGlimmerRunestone
 @_exported import TreeSitterGoModRunestone
@@ -30,10 +27,8 @@
 @_exported import TreeSitterNixRunestone
 @_exported import TreeSitterObjectiveCRunestone
 @_exported import TreeSitterPHPRunestone
-@_exported import TreeSitterPascalRunestone
 @_exported import TreeSitterProtoRunestone
 @_exported import TreeSitterPythonRunestone
-@_exported import TreeSitterRRunestone
 @_exported import TreeSitterRegexRunestone
 @_exported import TreeSitterRubyRunestone
 @_exported import TreeSitterRustRunestone
@@ -45,4 +40,3 @@
 @_exported import TreeSitterTypeScriptRunestone
 @_exported import TreeSitterXMLRunestone
 @_exported import TreeSitterYAMLRunestone
-@_exported import TreeSitterZigRunestone

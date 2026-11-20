@@ -19,7 +19,7 @@
 | 组件 | 版本 | 许可证路径 |
 | --- | --- | --- |
 | Highlight.js（核心与所选语言） | 11.12.0 | `ios/CodexLink/SyntaxAssets/HighlightJS-LICENSE`（BSD-3-Clause） |
-| Prism（核心与 Agda） | 1.30.0 | `ios/CodexLink/SyntaxAssets/Prism-LICENSE`（MIT） |
+| Prism（核心与 Agda、Bicep、Pascal、Zig） | 1.30.0 | `ios/CodexLink/SyntaxAssets/Prism-LICENSE`（MIT） |
 
 `scripts/bundle-syntax.py` 从固定 SHA-256 的 npm 归档生成内置资源。Runestone、Tree-sitter 语法的来源记录与许可证位于 `ios/Packages/Runestone/`。
 

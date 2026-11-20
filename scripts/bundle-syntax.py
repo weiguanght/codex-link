@@ -7,7 +7,11 @@ import tarfile
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / 'ios/CodexLink/SyntaxAssets'
-LANGUAGES = ('elixir', 'haskell', 'julia', 'latex', 'ocaml', 'perl', 'pgsql', 'scala', 'sql', 'verilog')
+HIGHLIGHT_LANGUAGES = (
+    'xml', 'markdown', 'dart',  # Dart doc comments embed Markdown with optional HTML.
+    'elixir', 'elm', 'haskell', 'julia', 'latex', 'ocaml', 'perl', 'pgsql', 'r', 'scala', 'sql', 'verilog',
+)
+PRISM_LANGUAGES = ('agda', 'bicep', 'pascal', 'zig')
 HIGHLIGHT_SHA = 'accbfaaab745088609b4eea2bdca2ad62f1f1dd27304e0f8df65cfe0fe042143'
 PRISM_SHA = 'ac16a9106a28c53b6a6313993c816a3a02525fdfefd7614fc1703df915a9fc11'
 
@@ -38,11 +42,12 @@ def main():
             '(function () {',
             'const hljs = ' + module(read(highlight, 'lib/core.js')) + ';',
         ]
-        for name in LANGUAGES:
+        for name in HIGHLIGHT_LANGUAGES:
             grammar = module(read(highlight, f'lib/languages/{name}.js'))
             parts.append(f'hljs.registerLanguage("{name}", {grammar});')
-        parts.extend(read(prism, name).rstrip() for name in (
-            'components/prism-core.min.js', 'components/prism-agda.min.js'))
+        parts.append(read(prism, 'components/prism-core.min.js').rstrip())
+        for name in PRISM_LANGUAGES:
+            parts.append(read(prism, f'components/prism-{name}.min.js').rstrip())
         parts.extend([(ROOT / 'scripts/syntax-adapter.js').read_text().rstrip(), '})();', ''])
         script = '\n'.join(parts)
         script = '\n'.join(line.rstrip(' \t') for line in script.split('\n'))
