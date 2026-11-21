@@ -16,7 +16,7 @@ def capabilities(row, shared_desktop=False):
     return {'readOnly': not control, 'send': control, 'stop': control, 'respond': control and not shared_desktop,
             'attachments': control, 'rename': control, 'threadSettings': control,
             'archive': control and row.get('host') == 'local', 'pin': True, 'hide': True,
-            'permanentDelete': control and row.get('host') == 'local' and not shared_desktop,
+            'permanentDelete': row.get('host') == 'local',
             'fullLog': row.get('host') == 'local' and row.get('historyReadable', False),
             'workspaceRead': control and row.get('host') == 'local' and bool(row.get('cwd')),
             'workspaceWrite': control and row.get('host') == 'local' and bool(row.get('cwd'))}

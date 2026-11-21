@@ -132,12 +132,15 @@ def main():
             try:
                 selected = SharedDesktop(args.shared_desktop, args.codex_home, args.data, args.shared_use_daemon,
                                          prefer_daemon=args.shared_background)
-                if args.shared_background and selected.desktop_in_use():
+                if args.shared_background and selected.desktop_in_use() and not selected.attach_existing():
                     waiting_for_desktop = selected
                     print('桌面已打开。网关将在桌面退出后切换到共享模式。', flush=True)
                 else:
                     desktop = selected
-                    desktop.start(stopped.is_set)
+                    if desktop.attached_pid is None:
+                        desktop.start(stopped.is_set)
+                    else:
+                        print('已重新连接正在运行的共享桌面；无需退出桌面或重新配对。', flush=True)
                     if stopped.is_set():
                         return
                     bridge = SharedDesktopBridge(desktop.home, args.data / 'bridge', desktop)

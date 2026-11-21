@@ -183,7 +183,11 @@ python3 run-mac.py --shared-desktop /path/to/ChatGPT.app
 
 沿用原来的 `--data`、`--port` 和 Codex 数据目录即可使用已有设备配对及本地会话。关闭共享网关会同时关闭它启动的桌面和 Runtime。独立启动的 daemon 继续运行。
 
-已验证新建、普通发送、补充、停止、模型与推理强度、归档和取消归档。打开尚未加载的会话时，可以用「连接会话」恢复。审批和问答、计划和目标模式、编辑与分支、永久删除、切换账号请在 Mac 操作。启动日志位于网关数据目录的 `shared-desktop.log` 和 `shared-app-server.log`。
+状态栏网关重新启动时，若桌面已经使用同一个私有 socket 和 Codex 数据目录，会直接重新连接，不必退出桌面。此时网关不拥有该桌面进程，关闭网关不会退出它。正常使用 stdio 的桌面仍需在任务结束后退出一次，才能切换到共享启动。
+
+已验证新建、普通发送、补充、停止、模型与推理强度、归档、取消归档和永久删除。永久删除先在网关的 `bridge/deletion-backups/` 中做只读恢复备份，再通过共享 App Server 的 `thread/delete` 删除；执行中、等待审批或有未确认操作的会话会拒绝删除。打开尚未加载的会话时，可以用「连接会话」恢复。审批和问答、计划和目标模式、编辑与分支、切换账号请在 Mac 操作。启动日志位于网关数据目录的 `shared-desktop.log` 和 `shared-app-server.log`。
+
+共享 daemon 可能把新建会话的 `originator` 记为首个客户端的来源（例如 `codex-tui`）。本网关通过自己的已确认创建记录识别这些会话，不改写原始来源，也不把其他 CLI／exec／内部历史自动变成可执行会话。实际运行时回归可用 `python3 scripts/test-shared-runtime.py --runtime /path/to/codex` 执行；只使用临时数据目录及本地测试模型服务，不访问生产账号和会话。
 
 ### 3. 安装 iOS 客户端
 

@@ -14,7 +14,7 @@ LOG = logging.getLogger(__name__)
 METHODS = {
     'thread/read', 'thread/resume', 'thread/turns/list', 'thread/unsubscribe',
     'thread/start', 'thread/name/set', 'thread/settings/update', 'thread/metadata/update',
-    'thread/archive', 'thread/unarchive',
+    'thread/archive', 'thread/unarchive', 'thread/delete',
     'turn/start', 'turn/steer', 'turn/interrupt',
 }
 

@@ -31,8 +31,6 @@ def archive(bridge, key, archived):
 
 @operation
 def delete_conversation(bridge, key, backup_root, read_only=False):
-    if getattr(bridge, 'shared_desktop', False):
-        raise PermissionError('共享桌面模式请在 Mac 永久删除会话。')
     if not read_only:
         bridge.store.get(key)
         session = bridge.session(key, attach=False, background=True)
@@ -57,7 +55,8 @@ def delete_conversation(bridge, key, backup_root, read_only=False):
             runtime_active = state.get('threadRuntimeStatus', {}).get('type') == 'active'
         if active or running or requests or queued or pending_goal or uncertain_action or runtime_active:
             raise ValueError('会话正在查看、执行或有待确认的操作，请先结束任务并关闭手机详情后再永久删除')
-        result = permanently_delete(bridge.codex_home, backup_root, key, confirmed=True)
+        result = (bridge.delete_shared(key, backup_root) if getattr(bridge, 'shared_desktop', False)
+                  else permanently_delete(bridge.codex_home, backup_root, key, confirmed=True))
         with bridge.lock:
             bridge.live.pop(key, None)
             bridge.listed.discard(key)

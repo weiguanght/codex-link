@@ -72,8 +72,8 @@ def handle(handler, write, path):
                     if action is None:
                         result = result['meta']
             else:
-                # The original store and owner checks still protect every
-                # eligible desktop operation. No source whitelist is relaxed.
+                # The store and live-owner checks still protect every operation;
+                # only confirmed shared-gateway creations supplement provenance.
                 return False
         handler.output(200, result)
     except PermissionError as exc:

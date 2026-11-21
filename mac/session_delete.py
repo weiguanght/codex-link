@@ -14,6 +14,7 @@ import tempfile
 import threading
 import time
 import uuid
+from .devices import save_private
 
 DATABASES = ('logs_2.sqlite', 'state_5.sqlite', 'thread_history_1.sqlite', 'sqlite/codex.db')
 INDEXES = ('session_index.jsonl', 'history.jsonl')
@@ -142,6 +143,69 @@ def _clean_index(path, identifier):
         finally:
             Path(temporary).unlink(missing_ok=True)
     return removed
+
+
+def backup_conversation(codex_home, backup_root, identifier, confirmed=False):
+    """Read-only recovery snapshot before the owning App Server deletes a thread.
+
+    In shared mode the running server must own the mutation and notify its
+    clients. Never take SQLite write locks or replace its live databases here.
+    """
+    try:
+        identifier = str(uuid.UUID(identifier))
+    except (ValueError, TypeError, AttributeError):
+        raise ValueError('会话 ID 无效') from None
+    if confirmed is not True:
+        raise PermissionError('永久删除需要显式确认')
+    home = Path(codex_home).resolve(strict=True)
+    base = Path(backup_root).resolve()
+    base.mkdir(parents=True, exist_ok=True, mode=0o700)
+    backup = Path(tempfile.mkdtemp(prefix=identifier + '-', dir=base))
+    manifest = {'version': 2, 'threadId': identifier, 'createdAt': time.time(),
+                'engine': 'app-server', 'status': 'preparing', 'databases': [], 'files': []}
+    with DELETE_LOCK, ExitStack() as stack:
+        try:
+            for relative in DATABASES:
+                source = home / relative
+                if not _safe_file(home, source):
+                    continue
+                connection = sqlite3.connect(source.as_uri() + '?mode=ro', uri=True, timeout=5)
+                stack.callback(connection.close)
+                connection.execute('PRAGMA query_only=ON')
+                connection.execute('BEGIN')
+                plans = _plans(connection, identifier)
+                destination = backup / relative
+                destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                _backup_rows(connection, destination, plans)
+                manifest['databases'].append(relative)
+            for source in [*(home / relative for relative in INDEXES), *_matching_logs(home, identifier)]:
+                if not _safe_file(home, source):
+                    continue
+                before = source.stat()
+                relative = str(source.relative_to(home))
+                destination = backup / relative
+                destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                shutil.copy2(source, destination)
+                destination.chmod(0o600)
+                after = source.stat()
+                if ((before.st_ino, before.st_size, before.st_mtime_ns) !=
+                        (after.st_ino, after.st_size, after.st_mtime_ns)
+                        or not filecmp.cmp(source, destination, shallow=False)):
+                    raise ValueError('会话文件仍在更新，请结束任务后再删除')
+                manifest['files'].append(relative)
+            manifest['status'] = 'backed_up'
+            save_private(backup / 'manifest.json', manifest)
+        except Exception as exc:
+            manifest.update(status='backup_failed', error=str(exc))
+            save_private(backup / 'manifest.json', manifest)
+            raise SessionDeleteError('删除尚未发送，备份未完成：' + str(backup) + '；' + str(exc)) from None
+    return backup
+
+
+def record_shared_deletion(backup, status, **details):
+    path = Path(backup) / 'manifest.json'
+    manifest = json.loads(path.read_text(encoding='utf-8'))
+    save_private(path, dict(manifest, status=status, **details))
 
 
 def permanently_delete(codex_home, backup_root, identifier, confirmed=False):

@@ -229,7 +229,7 @@ struct NativeSessionMenu: View {
             .confirmationDialog("永久删除此会话？", isPresented: $deleteSession, titleVisibility: .visible) {
                 Button("永久删除", role: .destructive) { perform { try await model.permanentlyDelete(current) } }
                 Button("取消", role: .cancel) {}
-            } message: { Text("将先备份，再删除 Mac 的 Codex 数据库、索引和此会话日志中的对应记录。应用内无法撤销；恢复备份保留在 Mac 网关数据目录。") }
+            } message: { Text("将先在 Mac 备份，再删除此会话及对应记录。正在执行的任务需先结束。应用内无法撤销；恢复备份保留在 Mac 网关数据目录。") }
             .alert("操作失败", isPresented: Binding(get: { !error.isEmpty }, set: { if !$0 { error = "" } })) { Button("好", role: .cancel) {} } message: { Text(error) }
     }
     private func perform(_ action: @escaping () async throws -> Void) {

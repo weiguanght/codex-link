@@ -3,6 +3,7 @@ import json
 import logging
 
 from bridge.store import SessionStore
+from .history_catalog import eligible
 
 MAX_RECORD = 8 * 1024 * 1024
 BLOCK_SIZE = 64 * 1024
@@ -64,3 +65,45 @@ class DesktopSessionStore(SessionStore):
         if skipped:
             LOG.warning('Skipped %d oversized saved-history records; desktop snapshot remains available', skipped)
         return b''.join(reversed(parts)), True
+
+
+class SharedDesktopSessionStore(DesktopSessionStore):
+    """Only the gateway's confirmed creations supplement the desktop whitelist.
+
+    A shared daemon keeps the originator of its initial client (often codex-tui)
+    even for later mobile/desktop creations. Do not rewrite that provenance or
+    make unrelated CLI/exec history executable.
+    """
+    def __init__(self, home, created_thread_ids):
+        super().__init__(home)
+        self.created_thread_ids = created_thread_ids
+
+    def get(self, thread_id):
+        with self._connect() as connection:
+            row = connection.execute('SELECT * FROM threads WHERE id = ?', (thread_id,)).fetchone()
+        result = dict(row) if row else None
+        if result is None or not eligible(dict(result, _database=True), self.created_thread_ids()):
+            raise KeyError('找不到可控制的桌面或本网关新建会话')
+        return result
+
+    def list(self, query='', limit=100, offset=0, archived=False):
+        # Enough original rows for this page, plus exact IDs from our ledger.
+        rows = {row['id']: row for row in super().list(query, limit + offset, 0, archived)}
+        created_ids = tuple(self.created_thread_ids())
+        if created_ids:
+            with self._connect() as connection:
+                columns = {r[1] for r in connection.execute('PRAGMA table_info(threads)')}
+                where = ['archived = ?', 'id IN (' + ','.join('?' for _ in created_ids) + ')']
+                params = [int(archived), *created_ids]
+                if query:
+                    fields = [name for name in ('name', 'title', 'cwd') if name in columns]
+                    where.append('(' + ' OR '.join(name + ' LIKE ?' for name in fields) + ')')
+                    params += ['%' + query + '%'] * len(fields)
+                for record in connection.execute('SELECT * FROM threads WHERE ' + ' AND '.join(where), params):
+                    row = dict(record)
+                    if eligible(dict(row, _database=True), created_ids):
+                        rows[row['id']] = row
+        def recency(row):
+            return next((row[key] * (1 if key.endswith('_ms') else 1000)
+                         for key in ('recency_at_ms', 'recency_at', 'updated_at') if row.get(key) is not None), 0)
+        return sorted(rows.values(), key=lambda row: (recency(row), row['id']), reverse=True)[offset:offset + limit]

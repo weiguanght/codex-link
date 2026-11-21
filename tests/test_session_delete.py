@@ -7,12 +7,15 @@ import tempfile
 import threading
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 
 import test_history as history
 from mac import session_delete as deletion
 from mac.workspace_http import delete_conversation
 from bridge.service import LiveSession
+from bridge.ipc import IPCError
+from mac.shared_bridge import SharedDesktopBridge
+from mac.shared_rpc import RPCRejected
 
 
 class SessionDeleteTests(unittest.TestCase):
@@ -203,6 +206,80 @@ class SessionDeleteTests(unittest.TestCase):
             perform.assert_not_called()
         session.state = None
         self.assertTrue(delete_conversation(bridge, self.key, self.backups, read_only=True)['deleted'])
+
+    def shared_bridge(self, replies=None):
+        bridge = SharedDesktopBridge.__new__(SharedDesktopBridge)
+        bridge.codex_home = self.home
+        bridge.lock = threading.RLock(); bridge.create_lock = threading.Lock()
+        bridge.creations = {'request': {'id': self.key, 'host': 'local'}}
+        bridge._save_creations = Mock()
+        session = LiveSession(self.key)
+        bridge.live = {self.key: session}; bridge.listed = {self.key}
+        bridge.store = SimpleNamespace(get=Mock())
+        bridge.session = Mock(return_value=session)
+        bridge.ipc = Mock()
+        bridge.ipc.request.side_effect = replies or [
+            {'thread': {'status': {'type': 'idle'}}}, {'thread': {'status': {'type': 'idle'}}}, {},
+        ]
+        return bridge
+
+    def test_shared_delete_uses_owner_rpc_after_read_only_backup_and_not_raw_cleanup(self):
+        bridge = self.shared_bridge()
+        before = {p: p.read_bytes() for p in self.home.rglob('*') if p.is_file()}
+        with patch('mac.workspace_http.permanently_delete') as raw_delete:
+            result = delete_conversation(bridge, self.key, self.backups)
+            raw_delete.assert_not_called()
+        self.assertTrue(result['deleted'])
+        self.assertEqual({p: p.read_bytes() for p in before}, before)  # fake owner does no writes
+        self.assertEqual(bridge.ipc.request.call_args_list, [
+            call('thread/read', {'threadId': self.key}), call('thread/read', {'threadId': self.key}),
+            call('thread/delete', {'threadId': self.key}, timeout=30),
+        ])
+        manifest = json.loads((Path(result['backup']) / 'manifest.json').read_text())
+        self.assertEqual((manifest['engine'], manifest['status']), ('app-server', 'deleted'))
+        self.assertTrue(bridge.creations['request']['deleted'])
+        self.assertNotIn(self.key, bridge.live)
+        with closing(sqlite3.connect(Path(result['backup']) / 'logs_2.sqlite')) as db:
+            self.assertEqual(db.execute('SELECT * FROM records').fetchall(), [(1, self.key, b'\x00delete')])
+
+    def test_shared_delete_rechecks_other_clients_after_backup(self):
+        bridge = self.shared_bridge([
+            {'thread': {'status': {'type': 'idle'}}}, {'thread': {'status': {'type': 'active'}}},
+        ])
+        with self.assertRaisesRegex(ValueError, '桌面端执行'):
+            delete_conversation(bridge, self.key, self.backups)
+        self.assertEqual([c.args[0] for c in bridge.ipc.request.call_args_list], ['thread/read', 'thread/read'])
+        self.assertEqual(json.loads(next(self.backups.glob('*/manifest.json')).read_text())['status'], 'cancelled')
+        self.assertTrue(self.log.exists())
+
+    def test_shared_delete_rejected_or_unknown_keeps_backup_and_never_replays(self):
+        for error, status in [(RPCRejected('thread/delete', {'message': 'busy'}), 'delete_rejected'),
+                              (IPCError('connection lost'), 'unknown')]:
+            bridge = self.shared_bridge([
+                {'thread': {'status': {'type': 'idle'}}}, {'thread': {'status': {'type': 'idle'}}}, error,
+            ])
+            with self.assertRaises(IPCError): delete_conversation(bridge, self.key, self.backups)
+            manifest = max(self.backups.glob('*/manifest.json'), key=lambda p: p.stat().st_mtime_ns)
+            self.assertEqual(json.loads(manifest.read_text())['status'], status)
+            self.assertEqual([c.args[0] for c in bridge.ipc.request.call_args_list].count('thread/delete'), 1)
+            bridge._save_creations.assert_not_called()
+        self.assertTrue(self.log.exists())
+
+    def test_shared_readonly_delete_does_not_activate_or_use_desktop_source_gate(self):
+        bridge = self.shared_bridge()
+        bridge.store.get.side_effect = AssertionError('desktop gate')
+        result = delete_conversation(bridge, self.key, self.backups, read_only=True)
+        self.assertTrue(result['deleted'])
+        bridge.session.assert_not_called()
+
+    def test_read_only_backup_keeps_source_rows_files_and_permissions(self):
+        before = {p: p.read_bytes() for p in self.home.rglob('*') if p.is_file()}
+        backup = deletion.backup_conversation(self.home, self.backups, self.key, confirmed=True)
+        self.assertEqual({p: p.read_bytes() for p in before}, before)
+        self.assertEqual((backup / self.log.relative_to(self.home)).read_bytes(), self.log.read_bytes())
+        for path in backup.rglob('*'):
+            self.assertEqual(path.stat().st_mode & 0o777, 0o700 if path.is_dir() else 0o600)
+        self.assertEqual(json.loads((backup / 'manifest.json').read_text())['status'], 'backed_up')
 
 
 if __name__ == '__main__':

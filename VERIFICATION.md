@@ -1,5 +1,15 @@
 # 验证记录
 
+## 共享 daemon 的开始任务与永久删除（2026-11-22）
+
+- 生产桌面 `26.1117.41037` 已使用共享 WebSocket，旧 IPC 不是本次失败点。复现「开始任务：找不到会话」：共享 daemon 首个客户端为 `codex-tui` 时，后续网关新建会话沿用该来源，创建完成后的原桌面来源白名单校验抛出 `KeyError`。永久删除此前被共享模式入口明确返回 403。
+- 仅本网关持久化记录中、由运行时确认的新建 ID 补充控制范围；仍要求数据库记录且排除内部／子代理。目录发现、CLI／exec 来源或日志文件名不会自行授予控制能力。新建显式使用持久化分页历史，旧会话按自己的 `historyMode` 读取。已知网关 ID 不需要重写原始 `originator`。
+- 共享模式永久删除先做只读、行级数据库及对应文件恢复备份，再使用当前共享 App Server 的 `thread/delete`，让运行时清理并通知客户端。保留认证、CSRF、显式确认、本机范围、执行／审批／未确认操作检查；备份之后再次检查运行时状态。断线或拒绝不自动重放删除。
+- `scripts/test-shared-runtime.py` 在一次性 Codex 数据目录及本地假模型服务中，通过实际配对 HTTPS 接口验证：自动命名新建、元信息与可控能力、首条发送与完成回复、创建／发送重试去重、旧 legacy 会话恢复、其他客户端运行中任务拒绝删除、归档恢复、永久删除备份与数据库／列表消失，以及其他会话保留。管理版 `0.171.0` 与 App 随带 `0.171.0-alpha.13` 均通过。日志：`build/gateway-fix-20261122/daemon-integration.log`、`build/gateway-fix-20261122/bundled-integration.log`。这不是生产模型或 iPhone 真机验收。
+- 生产网关已重新连接既有共享桌面，桌面 PID `16747` 和 daemon PID `93649` 保持不变。固定原证书的 HTTPS 身份接口返回 200；身份、设备配对、证书和私钥与切换前备份一致。未删除任何原有真实会话，未改模型／账号／网络设置。
+- Python 全量 188 项中 187 项通过；唯一失败仍为历史 `bridge/create.py` 与上游快照清单的 SHA-256 不一致，本次未修改该上游文件。对应日志：`build/gateway-fix-20261122/python-tests.log`。最新源码的定向共享来源／历史测试 8 项通过，删除测试 15 项通过。
+- `bash scripts/build-ios.sh` 的 arm64e Release 构建成功，TrollStore ad-hoc 签名、IPA 解包架构、压缩包及 SHA-256 校验通过。日志：`build/gateway-fix-20261122/ios-build.log`；最新包：`build/codex-link-0.1.0-TrollStore.ipa`。本次后端修复兼容已配对的旧 iOS 包，不要求重新安装或配对；已请用户在手机重试，两项真机结果尚待回报。
+
 ## arm64e 真机 IPA（2026-11-21）
 
 - Xcode 15.2 编译 arm64e Release，iOS-LaTeX Light 静态库与 Runestone 对象文件的架构均为 arm64e。解包确认两个 IPA 的主程序均为单架构 arm64e，最低系统版本为 iOS 16.0。

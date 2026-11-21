@@ -41,12 +41,14 @@ def internal(row):
             or str(row.get('model') or '').lower() == 'codex-auto-review')
 
 
-def eligible(row):
-    # Match the original store's get() gate, and conservatively exclude internal
-    # records. A whitelist match still requires an actual owner at execution time.
+def eligible(row, created_ids=()):
+    # Retain the original source gate, plus server-confirmed gateway creations
+    # on a shared daemon. A ledger match still needs a DB row and live owner;
+    # unrelated CLI/exec and internal records never gain control from discovery.
     return bool(row.get('_database') and not internal(row) and (
         row.get('originator') in DESKTOP
-        or row.get('originator') is None and row.get('source') == 'vscode'))
+        or row.get('originator') is None and row.get('source') == 'vscode'
+        or row.get('id') in created_ids))
 
 
 class HistoryUnavailable(ValueError):
@@ -74,11 +76,12 @@ def safe_log(home, value):
 
 
 class HistoryCatalog:
-    def __init__(self, home, clock=time.monotonic):
+    def __init__(self, home, clock=time.monotonic, created_thread_ids=None):
         self.home = Path(home).resolve()
         self.store = SessionStore(self.home)
         self.hosts = AppHosts(self.home)
         self.clock = clock
+        self.created_thread_ids = created_thread_ids or (lambda: ())
         self.lock = threading.RLock()
         self.expires = 0
         self.rows = {}
@@ -214,12 +217,13 @@ class HistoryCatalog:
                     except HistoryUnavailable:
                         row['rollout_path'] = log['rollout_path']
                     row['_log_mtime'] = log['_log_mtime']
+            created_ids = self.created_thread_ids()
             for key, row in rows.items():
                 row['title'] = str(row.get('name') or row.get('title') or titles.get(key) or '未命名会话')[:1000]
                 row['cwd'] = str(row.get('cwd') or '')
                 row['archived'] = bool(row.get('archived'))
                 row['internal'] = internal(row)
-                row['desktopEligible'] = eligible(row)
+                row['desktopEligible'] = eligible(row, created_ids)
                 row['readOnly'] = not row['desktopEligible']
                 row['discoveredBy'] = 'database' if row.get('_database') else 'jsonl'
                 row['recency_at_ms'] = next((milliseconds(row.get(k)) for k in
@@ -272,7 +276,7 @@ class HistoryCatalog:
                 raise PermissionError('仅支持转换本机数据库中的 CLI 会话')
             if internal(row) or row.get('archived'):
                 raise PermissionError('内部或已归档会话不能转换')
-            if row.get('originator') in DESKTOP:
+            if row.get('desktopEligible'):
                 return row
             # TUI sessions using the shared app-server daemon record vscode as
             # their source; originator still identifies the creating CLI client.
@@ -333,7 +337,7 @@ class ReadingLibrary:
     def __init__(self, bridge, workspace=None):
         from .history_reader import LogReader
         self.bridge = bridge
-        self.catalog = HistoryCatalog(bridge.codex_home)
+        self.catalog = HistoryCatalog(bridge.codex_home, created_thread_ids=getattr(bridge, 'created_thread_ids', None))
         self.reader = LogReader(bridge.codex_home)
         self.workspace = workspace
 

@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import plistlib
+import re
 import socket
 import subprocess
 import time
@@ -28,11 +29,38 @@ class SharedDesktop:
         if not os.access(self.runtime, os.X_OK):
             raise ValueError('所选 ChatGPT.app 缺少内置 Codex 运行时。')
         self.server = self.desktop = None
+        self.attached_pid = None
 
     def desktop_in_use(self):
         candidates = {self.gui, Path('/Applications/ChatGPT.app/Contents/MacOS/ChatGPT')}
         return (self.home == (Path.home() / '.codex').resolve()
                 and any(DesktopApp(path, self.home).processes() for path in candidates))
+
+    def attach_existing(self):
+        """Reuse only a GUI already launched against this exact private socket.
+
+        Reconnecting a gateway must not require quitting a shared desktop (and
+        interrupting its tasks). A normal stdio desktop is still never adopted.
+        """
+        for pid in DesktopApp(self.gui, self.home).processes():
+            try:
+                output = subprocess.run(['ps', 'eww', '-p', str(pid), '-o', 'command='],
+                                        capture_output=True, text=True, check=True, timeout=5).stdout.strip()
+                def value(name):
+                    match = re.search(r'(?:^|\s)' + name + r'=(.*?)(?=\s+[A-Za-z_][A-Za-z0-9_]*=|$)', output)
+                    return match.group(1) if match else None
+                if value('CODEX_HOME') != str(self.home):
+                    continue
+                endpoint = private_socket(self.control)
+                if value('CODEX_APP_SERVER_WS_URL') != f'ws+unix://localhost{endpoint}:/rpc':
+                    continue
+                with unix_connect(endpoint):
+                    pass
+                self.socket, self.attached_pid, self.use_daemon = endpoint, pid, True
+                return True
+            except (OSError, subprocess.SubprocessError, IPCError):
+                continue
+        return False
 
     def start(self, stopping=lambda: False):
         profile = os.environ.get('CODEX_ELECTRON_USER_DATA_PATH')
@@ -112,6 +140,12 @@ class SharedDesktop:
             raise IPCError('共享 App Server 启动失败，请查看 shared-app-server.log。')
 
     def running(self):
+        if self.attached_pid is not None:
+            try:
+                os.kill(self.attached_pid, 0)
+                return True
+            except ProcessLookupError:
+                return False
         return (self.desktop is not None and self.desktop.poll() is None
                 and (self.use_daemon or (self.server is not None and self.server.poll() is None)))
 

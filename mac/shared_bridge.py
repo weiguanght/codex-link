@@ -11,6 +11,8 @@ from bridge.remote import AppHosts
 from bridge.service import Bridge
 from bridge.timeline import timestamp_ms
 from .shared_rpc import RPCRejected, SharedRPC
+from .desktop_store import SharedDesktopSessionStore
+from .session_delete import backup_conversation, record_shared_deletion
 
 LOG = logging.getLogger(__name__)
 DELTAS = {
@@ -102,9 +104,16 @@ class SharedDesktopBridge(Bridge):
 
     def __init__(self, codex_home, data_dir, desktop):
         super().__init__(codex_home, data_dir, codex_bin=desktop.runtime)
+        self.store = SharedDesktopSessionStore(codex_home, self.created_thread_ids)
         self.hosts = LocalHosts(codex_home)
         self.ipc = SharedRPC(desktop.socket, codex_home, self._shared_event,
                              self._disconnected, desktop.running)
+
+    def created_thread_ids(self):
+        # Copy under the GIL; never acquire create_lock from catalog/store reads.
+        # Only server-confirmed IDs are recorded here, not user-supplied IDs.
+        return frozenset(row['id'] for row in self.creations.copy().values()
+                         if row.get('host') == 'local' and isinstance(row.get('id'), str) and not row.get('deleted'))
 
     def _shared_event(self, message):
         # Server-initiated approvals and input requests are handled in the GUI.
@@ -133,15 +142,19 @@ class SharedDesktopBridge(Bridge):
             reply = self.ipc.request('thread/resume', {**params, 'excludeTurns': True})
         else:
             reply = self.ipc.request('thread/read', params)
-        try:
-            history = self.ipc.request('thread/turns/list', {
-                **params, 'limit': limit, 'itemsView': 'full', 'sortDirection': 'desc',
-            })
-        except RPCRejected as exc:
-            # The verified runtime creates metadata before the first turn index.
-            if not exc.empty_history or reply['thread'].get('preview'):
-                raise
-            history = {'data': []}
+        if reply['thread'].get('historyMode') == 'legacy':
+            full = self.ipc.request('thread/read', {**params, 'includeTurns': True})
+            history = {'data': list(reversed(full['thread']['turns']))}
+        else:
+            try:
+                history = self.ipc.request('thread/turns/list', {
+                    **params, 'limit': limit, 'itemsView': 'full', 'sortDirection': 'desc',
+                })
+            except RPCRejected as exc:
+                # The verified runtime creates metadata before the first turn index.
+                if not exc.empty_history or reply['thread'].get('preview'):
+                    raise
+                history = {'data': []}
         state = thread_state(reply['thread'], history)
         if resume:
             state['latestModel'] = reply.get('model') or state['latestModel']
@@ -300,6 +313,34 @@ class SharedDesktopBridge(Bridge):
         return self.ipc.request('thread/archive' if archived else 'thread/unarchive',
                                 {'threadId': thread_id})
 
+    def delete_shared(self, thread_id, backup_root):
+        def idle():
+            thread = self.ipc.request('thread/read', {'threadId': thread_id})['thread']
+            if thread.get('status', {}).get('type') not in ('idle', 'notLoaded'):
+                raise ValueError('会话仍在桌面端执行或等待审批，请结束任务后再删除')
+        idle()
+        backup = backup_conversation(self.codex_home, backup_root, thread_id, confirmed=True)
+        try:
+            # Another client may have started a turn while we copied its files.
+            idle()
+            self.ipc.request('thread/delete', {'threadId': thread_id}, timeout=30)
+        except RPCRejected as exc:
+            record_shared_deletion(backup, 'delete_rejected', error=str(exc))
+            raise
+        except IPCError as exc:
+            record_shared_deletion(backup, 'unknown', error=str(exc))
+            raise IPCError('删除结果未确认，请刷新列表后再决定是否重试。恢复备份：' + str(backup)) from exc
+        except ValueError as exc:
+            record_shared_deletion(backup, 'cancelled', error=str(exc))
+            raise
+        record_shared_deletion(backup, 'deleted')
+        with self.create_lock:
+            for entry in self.creations.values():
+                if entry.get('id') == thread_id:
+                    entry['deleted'] = True
+            self._save_creations()
+        return {'deleted': True, 'threadId': thread_id, 'backup': str(backup)}
+
     @operation
     def create_chat(self, project_key, title, request_id, settings=None):
         if not isinstance(request_id, str):
@@ -332,11 +373,14 @@ class SharedDesktopBridge(Bridge):
                     raise ValueError('同一创建请求不能用于不同内容')
                 if 'id' not in entry:
                     raise CreationError('上次创建结果尚不确定，请先刷新聊天列表。')
+                if entry.get('deleted'):
+                    raise CreationError('此创建请求对应的会话已删除，请使用新的创建请求。')
             else:
                 self.ipc.connect()
                 self.creations[request_id] = entry = identity
                 self._save_creations()
                 params = {'cwd': project['cwd'] if project else str(self.codex_home.parent),
+                          'ephemeral': False, 'historyMode': 'paginated', 'threadSource': 'user',
                           **{key: settings[key] for key in ('model', 'approvalPolicy', 'sandbox') if key in settings}}
                 if 'effort' in settings:
                     params['config'] = {'model_reasoning_effort': settings['effort']}
