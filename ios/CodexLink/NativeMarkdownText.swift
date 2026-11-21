@@ -141,7 +141,8 @@ private final class FormulaAttachment: NSTextAttachment {
     init?(_ formula: NativeMarkdownMath.Formula, size: CGFloat, color: UIColor, width: CGFloat) {
         guard formula.latex.count <= 1_000 else { return nil }
         guard let rendered = NativeLatexRenderer.render(formula.latex, widthLimit: width,
-                                                         fontSize: size, textColor: color),
+                                                         fontSize: size, textColor: color,
+                                                         display: formula.display),
               rendered.image.size.width > 0, rendered.image.size.height > 0 else { return nil }
         source = formula.source
         super.init(data: nil, ofType: nil)

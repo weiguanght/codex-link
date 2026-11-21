@@ -205,11 +205,7 @@ final class NativeSmoke: ObservableObject {
         styled.enumerateAttribute(.attachment, in: NSRange(location: 0, length: styled.length)) { value, _, _ in
             if let attachment = value as? NSTextAttachment, attachment.image != nil { formulas += 1 }
         }
-        #if targetEnvironment(simulator)
-        try require(formulas == 0 && styled.string.contains(#"\mathbf{x}"#), "Simulator LaTeX fallback lost the original formula")
-        #else
         try require(formulas == 3, "Inline or display formula was not typeset")
-        #endif
         let vectorEquations = NativeMarkdownText.styled(#"""
         \[
         \mathbf x=\mathbf x_0+\boldsymbol{\delta}
@@ -235,21 +231,13 @@ final class NativeSmoke: ObservableObject {
         \dot{\boldsymbol{\xi}}=J\boldsymbol{\xi}
         \]
         """#, traits: UITraitCollection())
-        #if targetEnvironment(simulator)
-        try require(vectorEquations.string.contains(#"\boldsymbol{\delta}"#), "Simulator LaTeX fallback lost bold symbols")
-        #else
         var vectorAttachments = 0
         vectorEquations.enumerateAttribute(.attachment, in: NSRange(location: 0, length: vectorEquations.length)) { value, _, _ in
             if value is FormulaAttachment { vectorAttachments += 1 }
         }
         try require(vectorAttachments == 6, "A bold-vector display equation did not render")
-        #endif
         let blockFormula = NativeMarkdownText.styled(#"$$\sum_{n=1}^{\infty} \frac{1}{n^2}$$"#, traits: UITraitCollection(userInterfaceStyle: .dark))
-        #if targetEnvironment(simulator)
-        try require(blockFormula.string.contains(#"\sum_{n=1}^{\infty}"#), "Simulator LaTeX fallback lost the display formula")
-        #else
         try require(blockFormula.attribute(.attachment, at: 0, effectiveRange: nil) is NSTextAttachment, "Dollar-delimited display math was not typeset")
-        #endif
         let literal = NativeMarkdownMath.protect(#"`$x$` · \$7 · $7 and $9 · [file](/p-$literal$.txt)"#)
         try require(literal.formulas.isEmpty, "Code, currency, escaped math, or a link destination became a formula: " + literal.formulas.values.map(\.source).joined(separator: " | "))
         let fallback = NativeMarkdownText.styled(#"Before $\madeup{x}$ after"#, traits: UITraitCollection())

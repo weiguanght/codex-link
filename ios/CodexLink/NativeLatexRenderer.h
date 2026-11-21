@@ -10,5 +10,6 @@
 + (nullable NativeLatexImage *)render:(NSString *)latex
                            widthLimit:(CGFloat)widthLimit
                              fontSize:(CGFloat)fontSize
-                            textColor:(UIColor *)textColor;
+                            textColor:(UIColor *)textColor
+                              display:(BOOL)display;
 @end
