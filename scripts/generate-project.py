@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Generate the Xcode project with vendored local Swift packages."""
 import hashlib
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -12,16 +13,23 @@ def identifier(value):
 
 def main():
     files = sorted((ROOT / 'ios/CodexLink').glob('*.swift'))
+    objc_files = sorted((ROOT / 'ios/CodexLink').glob('*.m'))
+    header_files = sorted((ROOT / 'ios/CodexLink').glob('*.h'))
     objects = []
     def obj(name, value):
         objects.append(f'{identifier(name)} = {{ {value} }};')
     refs, builds = [], []
-    for file in files:
+    for file in [*files, *objc_files]:
         ref, build = 'ref:' + file.name, 'build:' + file.name
-        obj(ref, f'isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "{file.name}"; sourceTree = "<group>";')
+        file_type = 'sourcecode.swift' if file.suffix == '.swift' else 'sourcecode.c.objc'
+        obj(ref, f'isa = PBXFileReference; lastKnownFileType = {file_type}; path = "{file.name}"; sourceTree = "<group>";')
         obj(build, f'isa = PBXBuildFile; fileRef = {identifier(ref)};')
         refs.append(identifier(ref))
         builds.append(identifier(build))
+    for file in header_files:
+        ref = 'ref:' + file.name
+        obj(ref, f'isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "{file.name}"; sourceTree = "<group>";')
+        refs.append(identifier(ref))
     obj('app', 'isa = PBXFileReference; explicitFileType = wrapper.application; path = CodexLink.app; sourceTree = BUILT_PRODUCTS_DIR;')
     obj('assets', 'isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>";')
     obj('assetsbuild', f'isa = PBXBuildFile; fileRef = {identifier("assets")};')
@@ -29,6 +37,25 @@ def main():
     obj('syntaxassets', 'isa = PBXFileReference; lastKnownFileType = folder; path = SyntaxAssets; sourceTree = "<group>";')
     obj('syntaxassetsbuild', f'isa = PBXBuildFile; fileRef = {identifier("syntaxassets")};')
     refs.append(identifier('syntaxassets'))
+    obj('dslatex', 'isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = Frameworks/DSLatex.framework; sourceTree = SOURCE_ROOT;')
+    refs.append(identifier('dslatex'))
+    framework_files = ('DSLatex', 'Info.plist', 'latinmodern-math.otf', 'latinmodern-math.clm1')
+    framework_inputs = tuple('$(PROJECT_DIR)/Frameworks/DSLatex.framework/' + name for name in framework_files)
+    framework_outputs = tuple('$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/DSLatex.framework/' + name
+                              for name in framework_files)
+    embed_script = '''if [ "$PLATFORM_NAME" = "iphoneos" ]; then
+  destination="$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/DSLatex.framework"
+  /bin/mkdir -p "$destination"
+''' + ''.join(
+        '  /bin/cp "$PROJECT_DIR/Frameworks/DSLatex.framework/' + name + '" "$destination/' + name + '"\n'
+        for name in framework_files) + '''fi
+'''
+    obj('embeddslatex', f'''isa = PBXShellScriptBuildPhase; buildActionMask = 2147483647;
+        inputPaths = ({",".join(json.dumps(path) for path in framework_inputs)},);
+        name = "Embed DSLatex for iOS device";
+        outputPaths = ({",".join(json.dumps(path) for path in framework_outputs)},);
+        runOnlyForDeploymentPostprocessing = 0; shellPath = /bin/sh;
+        shellScript = {json.dumps(embed_script)};''')
     obj('sourcegroup', f'isa = PBXGroup; path = CodexLink; sourceTree = "<group>"; children = ({",".join(refs)},);')
     obj('products', f'isa = PBXGroup; name = Products; sourceTree = "<group>"; children = ({identifier("app")},);')
     obj('main', f'isa = PBXGroup; sourceTree = "<group>"; children = ({identifier("sourcegroup")},{identifier("products")},);')
@@ -36,8 +63,6 @@ def main():
     obj('resources', f'isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ({identifier("assetsbuild")},{identifier("syntaxassetsbuild")},); runOnlyForDeploymentPostprocessing = 0;')
     packages = ['Runestone', 'RunestoneLanguageSupport']
     obj('editorpackage', 'isa = XCLocalSwiftPackageReference; relativePath = Packages/Runestone;')
-    obj('mathpackage', 'isa = XCLocalSwiftPackageReference; relativePath = Packages/SwiftMath;')
-    packages.append('SwiftMath')
     for product in packages:
         obj('packageproduct:' + product, f'isa = XCSwiftPackageProductDependency; productName = {product};')
         obj('packagebuild:' + product, f'isa = PBXBuildFile; productRef = {identifier("packageproduct:" + product)};')
@@ -49,6 +74,9 @@ def main():
             INFOPLIST_FILE = CodexLink/Info.plist; GENERATE_INFOPLIST_FILE = NO;
             TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_STYLE = Automatic;
             SWIFT_VERSION = 5.0; IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+            SWIFT_OBJC_BRIDGING_HEADER = CodexLink/NativeLatexRenderer.h;
+            "FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]" = "$(PROJECT_DIR)/Frameworks";
+            "OTHER_LDFLAGS[sdk=iphoneos*]" = "$(inherited) -framework DSLatex";
             SWIFT_OPTIMIZATION_LEVEL = {"-Onone" if name == "Debug" else "-O"};
             ENABLE_USER_SCRIPT_SANDBOXING = YES;
             ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -59,7 +87,7 @@ def main():
     obj('target', f'''isa = PBXNativeTarget; name = "codex-link"; productName = CodexLink;
         productType = "com.apple.product-type.application"; productReference = {identifier('app')};
         buildConfigurationList = {identifier('targetconfigs')};
-        buildPhases = ({identifier('sources')},{identifier('frameworks')},{identifier('resources')},);
+        buildPhases = ({identifier('sources')},{identifier('frameworks')},{identifier('resources')},{identifier('embeddslatex')},);
         buildRules = (); dependencies = (); packageProductDependencies = ({",".join(identifier("packageproduct:" + p) for p in packages)},);''')
     obj('uitestref', 'isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeFlows.swift; sourceTree = "<group>";')
     obj('uitestbuild', f'isa = PBXBuildFile; fileRef = {identifier("uitestref")};')
@@ -86,7 +114,7 @@ def main():
         buildConfigurationList = {identifier('projectconfigs')}; compatibilityVersion = "Xcode 14.0";
         developmentRegion = zh_CN; hasScannedForEncodings = 0; knownRegions = (zh_CN,en,Base,);
         mainGroup = {identifier('main')}; productRefGroup = {identifier('products')};
-        projectDirPath = ""; projectRoot = ""; packageReferences = ({identifier('editorpackage')},{identifier('mathpackage')},); targets = ({identifier('target')},{identifier('uitesttarget')},);''')
+        projectDirPath = ""; projectRoot = ""; packageReferences = ({identifier('editorpackage')},); targets = ({identifier('target')},{identifier('uitesttarget')},);''')
     project = ROOT / 'ios/codex-link.xcodeproj'
     project.mkdir(exist_ok=True)
     (project / 'project.pbxproj').write_text('// !$*UTF8*$!\n{ archiveVersion = 1; classes = {}; objectVersion = 56; objects = {\n' + '\n'.join(objects) + f'\n}}; rootObject = {identifier("project")}; }}\n')

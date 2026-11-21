@@ -18,6 +18,13 @@ xcodebuild -project "$ROOT/ios/codex-link.xcodeproj" -target codex-link \
   CONFIGURATION_BUILD_DIR="$ROOT/build/iphoneos" \
   SYMROOT="$ROOT/build/products" OBJROOT="$ROOT/build/intermediates" \
   CODE_SIGNING_ALLOWED=NO build
+FRAMEWORK="$APP_OUTPUT/Frameworks/DSLatex.framework"
+if [[ ! -d "$FRAMEWORK" ]]; then
+  echo "DSLatex.framework was not embedded in the device app" >&2
+  exit 1
+fi
+/usr/bin/codesign --force --sign - --timestamp=none "$FRAMEWORK"
+/usr/bin/codesign --verify --strict "$FRAMEWORK"
 STAGE="$(mktemp -d "$ROOT/build/package.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
 mkdir "$STAGE/Payload"

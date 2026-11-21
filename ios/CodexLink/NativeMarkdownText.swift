@@ -1,5 +1,4 @@
 import SwiftUI
-import SwiftMath
 import UIKit
 
 enum NativeMarkdownMath {
@@ -43,7 +42,8 @@ enum NativeMarkdownMath {
 
 enum NativeMarkdownText {
     static func styled(_ text: String, traits: UITraitCollection, cell: Bool = false, bold: Bool = false,
-                       alignment: NativeMarkdownTable.ColumnAlignment = .leading) -> NSAttributedString {
+                       alignment: NativeMarkdownTable.ColumnAlignment = .leading,
+                       availableWidth: CGFloat = UIScreen.main.bounds.width - 32) -> NSAttributedString {
         let protected = NativeMarkdownMath.protect(text)
         let result = NSMutableAttributedString(string: "")
         let lines = protected.text.components(separatedBy: "\n")
@@ -106,7 +106,9 @@ enum NativeMarkdownText {
                 let range = (rendered.string as NSString).range(of: marker)
                 guard range.location != NSNotFound else { continue }
                 let replacement: NSAttributedString
-                if let attachment = FormulaAttachment(formula, size: size, color: color.resolvedColor(with: traits)) {
+                if let attachment = FormulaAttachment(formula, size: size,
+                                                       color: color.resolvedColor(with: traits),
+                                                       width: availableWidth) {
                     replacement = NSAttributedString(attachment: attachment)
                 } else {
                     replacement = NSAttributedString(string: formula.source, attributes: [.font: UIFont.systemFont(ofSize: size), .foregroundColor: color])
@@ -136,15 +138,16 @@ enum NativeMarkdownText {
 private final class FormulaAttachment: NSTextAttachment {
     let source: String
 
-    init?(_ formula: NativeMarkdownMath.Formula, size: CGFloat, color: UIColor) {
+    init?(_ formula: NativeMarkdownMath.Formula, size: CGFloat, color: UIColor, width: CGFloat) {
         guard formula.latex.count <= 1_000 else { return nil }
-        var math = MathImage(latex: formula.latex, fontSize: size, textColor: color, labelMode: formula.display ? .display : .text)
-        let (_, image, layout) = math.asImage()
-        guard let image, let layout, image.size.width > 0, image.size.height > 0 else { return nil }
+        guard let rendered = NativeLatexRenderer.render(formula.latex, widthLimit: width,
+                                                         fontSize: size, textColor: color),
+              rendered.image.size.width > 0, rendered.image.size.height > 0 else { return nil }
         source = formula.source
         super.init(data: nil, ofType: nil)
-        self.image = image
-        bounds = CGRect(x: 0, y: -layout.descent, width: image.size.width, height: image.size.height)
+        image = rendered.image
+        bounds = CGRect(x: 0, y: -rendered.baseline,
+                        width: rendered.image.size.width, height: rendered.image.size.height)
     }
 
     required init?(coder: NSCoder) { nil }
@@ -202,8 +205,10 @@ struct NativeSelectableText: UIViewRepresentable {
         let traits = UITraitCollection(traitsFrom: [
             view.traitCollection, UITraitCollection(userInterfaceStyle: colorScheme == .dark ? .dark : .light)
         ])
+        let availableWidth = view.bounds.width > 0 ? view.bounds.width : UIScreen.main.bounds.width - 32
         let value = plain ? NSAttributedString(string: text, attributes: [.font: UIFont.preferredFont(forTextStyle: .body, compatibleWith: traits), .foregroundColor: UIColor.label]) :
-            NativeMarkdownText.styled(text, traits: traits, cell: cell, bold: bold, alignment: alignment)
+            NativeMarkdownText.styled(text, traits: traits, cell: cell, bold: bold,
+                                      alignment: alignment, availableWidth: availableWidth)
         view.attributedText = value
         view.accessibilityLabel = NativeMarkdownText.copiedText(value, range: NSRange(location: 0, length: value.length))
         if selected.location != NSNotFound, NSMaxRange(selected) <= value.length { view.selectedRange = selected }
