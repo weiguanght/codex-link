@@ -23,8 +23,11 @@ def main():
     parser.add_argument('--check-desktop', action='store_true', help='只检查桌面 IPC 握手，不启动网关或打开会话')
     parser.add_argument('--shared-desktop', type=Path, metavar='CHATGPT.APP',
                         help='启动所选新版桌面，并让网关和桌面共用本地 App Server')
-    parser.add_argument('--shared-use-daemon', action='store_true',
-                        help='共享模式使用当前 Codex 数据目录已在运行的 App Server daemon')
+    shared_options = parser.add_mutually_exclusive_group()
+    shared_options.add_argument('--shared-use-daemon', action='store_true',
+                                help='共享模式使用当前 Codex 数据目录已在运行的 App Server daemon')
+    shared_options.add_argument('--shared-background', action='store_true',
+                                help='为状态栏网关启用共享启动，并等待已打开的桌面退出')
     parser.add_argument('--data', type=Path, default=ROOT / '.local')
     parser.add_argument('--codex-home', type=Path, default=Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex'))))
     parser.add_argument('--port', type=int, default=18443)
@@ -37,6 +40,8 @@ def main():
         parser.error('--shared-desktop 需要单独启动网关')
     if args.shared_use_daemon and not args.shared_desktop:
         parser.error('--shared-use-daemon 需要 --shared-desktop')
+    if args.shared_background and not args.shared_desktop:
+        parser.error('--shared-background 需要 --shared-desktop')
     if args.check_desktop:
         try:
             activate_bridge(args.bridge)
@@ -105,23 +110,43 @@ def main():
 
     bridge = None
     desktop = None
+    waiting_for_desktop = None
     server = None
     publisher = None
     notifications = None
     stopped = threading.Event()
+
+    def stop(*_):
+        if not stopped.is_set():
+            stopped.set()
+            if server is not None:
+                threading.Thread(target=server.shutdown, daemon=True).start()
+
+    signal.signal(signal.SIGINT, stop)
+    signal.signal(signal.SIGTERM, stop)
     try:
         if args.shared_desktop:
             from bridge.ipc import IPCError
             from mac.shared_bridge import SharedDesktopBridge
             from mac.shared_launch import SharedDesktop
             try:
-                desktop = SharedDesktop(args.shared_desktop, args.codex_home, args.data, args.shared_use_daemon)
-                desktop.start()
-                bridge = SharedDesktopBridge(desktop.home, args.data / 'bridge', desktop)
-                bridge.ipc.connect()
+                selected = SharedDesktop(args.shared_desktop, args.codex_home, args.data, args.shared_use_daemon,
+                                         prefer_daemon=args.shared_background)
+                if args.shared_background and selected.desktop_in_use():
+                    waiting_for_desktop = selected
+                    print('桌面已打开。网关将在桌面退出后切换到共享模式。', flush=True)
+                else:
+                    desktop = selected
+                    desktop.start(stopped.is_set)
+                    if stopped.is_set():
+                        return
+                    bridge = SharedDesktopBridge(desktop.home, args.data / 'bridge', desktop)
+                    bridge.ipc.connect()
             except (IPCError, OSError, ValueError, subprocess.SubprocessError) as exc:
                 parser.error(str(exc))
-        else:
+        if stopped.is_set():
+            return
+        if bridge is None:
             bridge = DesktopBridge(args.codex_home, args.data / 'bridge')
         server = LinkServer(('::', args.port), bridge, runtime / 'web', args.data, discover())
         notifications = Notifications(bridge, args.data / 'bridge', origins=lambda: list(server.origins))
@@ -142,11 +167,6 @@ def main():
                     print('Bonjour 广播已退出；请重启启动器', flush=True)
                     return
         threading.Thread(target=refresh, daemon=True).start()
-        def stop(*_):
-            stopped.set()
-            threading.Thread(target=server.shutdown, daemon=True).start()
-        signal.signal(signal.SIGINT, stop)
-        signal.signal(signal.SIGTERM, stop)
         if desktop:
             def watch_desktop():
                 while not stopped.wait(1):
@@ -155,6 +175,16 @@ def main():
                         stop()
                         return
             threading.Thread(target=watch_desktop, daemon=True).start()
+        if waiting_for_desktop:
+            def watch_for_desktop_exit():
+                while not stopped.wait(3):
+                    if not waiting_for_desktop.desktop_in_use():
+                        print('桌面已退出，状态栏将重启共享网关。', flush=True)
+                        stop()
+                        return
+            threading.Thread(target=watch_for_desktop_exit, daemon=True).start()
+        if stopped.is_set():
+            return
         print('codex-link 已启动；在同一 Wi-Fi 打开 iOS App，首次在 Mac 点“允许”。', flush=True)
         print('HTTPS 端口：', args.port, '；不修改系统或路由器防火墙。', flush=True)
         for ip in server.interfaces.ipv4 + server.interfaces.ipv6:

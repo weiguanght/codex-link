@@ -6,6 +6,7 @@ struct GatewayConfiguration: Decodable {
     let pythonExecutable: String
     let logDirectory: String
     let launchAgent: String
+    let sharedDesktop: String?
 }
 
 final class GatewayDelegate: NSObject, NSApplicationDelegate {
@@ -134,6 +135,9 @@ final class GatewayDelegate: NSObject, NSApplicationDelegate {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: configuration.pythonExecutable)
         process.arguments = ["-u", configuration.projectDirectory + "/run-mac.py"]
+        if let sharedDesktop = configuration.sharedDesktop {
+            process.arguments?.append(contentsOf: ["--shared-desktop", sharedDesktop, "--shared-background"])
+        }
         process.currentDirectoryURL = URL(fileURLWithPath: configuration.projectDirectory)
         var environment = ProcessInfo.processInfo.environment
         environment["PATH"] = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -173,7 +177,9 @@ final class GatewayDelegate: NSObject, NSApplicationDelegate {
     @objc private func quitGateway() {
         let alert = NSAlert()
         alert.messageText = "退出 Mac 网关？"
-        alert.informativeText = "手机助手会断开连接，下次登录 Mac 时会自动启动。"
+        alert.informativeText = configuration.sharedDesktop == nil
+            ? "手机助手会断开连接，下次登录 Mac 时会自动启动。"
+            : "手机助手会断开连接，网关启动的 Codex 桌面也会退出。下次登录 Mac 时会自动启动。"
         alert.addButton(withTitle: "退出网关")
         alert.addButton(withTitle: "取消")
         guard alert.runModal() == .alertFirstButtonReturn else { return }

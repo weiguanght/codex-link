@@ -12,10 +12,11 @@ from .shared_rpc import private_socket, unix_connect
 
 
 class SharedDesktop:
-    def __init__(self, bundle, home, data, use_daemon=False):
+    def __init__(self, bundle, home, data, use_daemon=False, prefer_daemon=False):
         self.bundle, self.home = bundle.expanduser().resolve(), home.expanduser().resolve()
         self.data = data
         self.use_daemon = use_daemon
+        self.prefer_daemon = prefer_daemon
         self.control = self.home / 'app-server-control/app-server-control.sock'
         try:
             info = plistlib.loads((self.bundle / 'Contents/Info.plist').read_bytes())
@@ -28,16 +29,19 @@ class SharedDesktop:
             raise ValueError('所选 ChatGPT.app 缺少内置 Codex 运行时。')
         self.server = self.desktop = None
 
-    def start(self):
+    def desktop_in_use(self):
+        candidates = {self.gui, Path('/Applications/ChatGPT.app/Contents/MacOS/ChatGPT')}
+        return (self.home == (Path.home() / '.codex').resolve()
+                and any(DesktopApp(path, self.home).processes() for path in candidates))
+
+    def start(self, stopping=lambda: False):
         profile = os.environ.get('CODEX_ELECTRON_USER_DATA_PATH')
         if not profile and self.home != (Path.home() / '.codex').resolve():
             raise ValueError('独立 Codex 数据目录需要同时指定独立的 CODEX_ELECTRON_USER_DATA_PATH。')
-        candidates = {self.gui, Path('/Applications/ChatGPT.app/Contents/MacOS/ChatGPT')}
-        default_home = (Path.home() / '.codex').resolve()
-        if self.home == default_home and any(DesktopApp(path, self.home).processes() for path in candidates):
+        if self.desktop_in_use():
             raise ValueError('请先在 Mac 退出已打开的 Codex 桌面，再启动共享模式。')
         self.home.mkdir(mode=0o700, parents=True, exist_ok=True)
-        if self.control.exists() and not self.use_daemon:
+        if self.control.exists() and not (self.use_daemon or self.prefer_daemon):
             resolved = private_socket(self.control)
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
                 sock.settimeout(1)
@@ -50,15 +54,21 @@ class SharedDesktop:
         env = {**os.environ, 'CODEX_HOME': str(self.home)}
         env.pop('CODEX_APP_SERVER_FORCE_CLI', None)
         env.pop('CODEX_APP_SERVER_WS_URL', None)
-        if self.use_daemon:
+        if self.use_daemon or self.prefer_daemon:
             try:
                 self.socket = private_socket(self.control)
                 with unix_connect(self.socket):
                     pass
+                self.use_daemon = True
+            except (FileNotFoundError, ConnectionRefusedError) as exc:
+                if self.use_daemon:
+                    raise IPCError('没有可用的本地 App Server daemon。') from exc
             except (OSError, TimeoutError) as exc:
                 raise IPCError('没有可用的本地 App Server daemon。') from exc
-        else:
-            self._start_server(env)
+        if not self.use_daemon and not stopping():
+            self._start_server(env, stopping)
+        if stopping():
+            return
         env['CODEX_APP_SERVER_WS_URL'] = f'ws+unix://localhost{self.socket}:/rpc'
         args = [str(self.gui)]
         if profile:
@@ -74,7 +84,7 @@ class SharedDesktop:
             log.seek(start_offset)
             deadline = time.monotonic() + 25
             local_transport = False
-            while self.running() and time.monotonic() < deadline:
+            while not stopping() and self.running() and time.monotonic() < deadline:
                 for line in log:
                     if b'Starting app-server connection hostId=local' in line:
                         local_transport = b'transport=websocket' in line
@@ -82,22 +92,24 @@ class SharedDesktop:
                             and b'outcome=success transportKind=websocket' in line):
                         return
                 time.sleep(.1)
-        raise IPCError('新版桌面未连接共享 App Server，请查看 shared-desktop.log。')
+        if not stopping():
+            raise IPCError('新版桌面未连接共享 App Server，请查看 shared-desktop.log。')
 
-    def _start_server(self, env):
+    def _start_server(self, env, stopping):
         with (self.data / 'shared-app-server.log').open('ab') as log:
             self.server = subprocess.Popen([str(self.runtime), 'app-server', '--listen', 'unix://'],
                 cwd=self.home, env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
                 start_new_session=True)
         deadline = time.monotonic() + 10
-        while self.server.poll() is None and time.monotonic() < deadline:
+        while not stopping() and self.server.poll() is None and time.monotonic() < deadline:
             try:
                 with unix_connect(self.control):
                     self.socket = private_socket(self.control)
                 return
             except OSError:
                 time.sleep(.1)
-        raise IPCError('共享 App Server 启动失败，请查看 shared-app-server.log。')
+        if not stopping():
+            raise IPCError('共享 App Server 启动失败，请查看 shared-app-server.log。')
 
     def running(self):
         return (self.desktop is not None and self.desktop.poll() is None

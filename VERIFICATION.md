@@ -1,5 +1,11 @@
 # 验证记录
 
+## 新版桌面随状态栏网关启动（2026-11-21）
+
+- 本机「Codex网关.app」升级至 1.1，沿用原 LaunchAgent 和配对目录。通过 launchctl 启动后，状态栏进程运行正常，18443 上的 HTTPS 身份接口返回 200。已打开的生产桌面继续运行。
+- 在独立数据目录验证 Intel `26.1117.41037`。无 daemon 时，后台网关启动内置 App Server，桌面以 WebSocket 成功握手，HTTPS 身份接口返回 200，退出网关时释放端口。本机既有 daemon 的 App Server 握手也通过。
+- 桌面相关 Python 测试 20 项通过。全量共 175 项，历史提交 `4253556` 修改了 `bridge/create.py`，留下 1 项上游快照校验失败。TrollStore IPA 构建和归档校验通过。
+
 ## 首页与消息页顶部布局（2026-11-21）
 
 - 首页和消息页共用固定标题栏，滚动区从标题栏下缘开始。iPhone 15（iOS 17.2）模拟器通过 2 项定向 UI 测试，覆盖首条消息、反复打开会话和返回首页、边缘滑动及标题栏菜单。测试结果保存在 `build/top-layout/ui-005656.xcresult` 和 `build/top-layout/menu.xcresult`。

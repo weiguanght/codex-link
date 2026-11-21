@@ -17,7 +17,20 @@ rm ~/Library/LaunchAgents/com.hoto.codex-link.gateway.plist
 
 取消自启后仍可手动打开状态栏 App。需要恢复原终端方式时，在项目目录运行 `python3 run-mac.py`，不要与正在运行的网关重复启动。
 
-首次构建安装命令为 `python3 mac/statusbar/install.py`，需要 Xcode 命令行工具。安装脚本遇到已有 App 或自启文件时会停止，以免覆盖现有安装。
+## 新版桌面共享启动
+
+Intel 桌面版 `26.1117.31558` 和 `26.1117.41037` 可以让状态栏网关和桌面共用本地 App Server。在项目目录运行以下命令升级已安装的网关。
+
+```sh
+python3 -m pip install 'websockets>=15,<16'
+python3 mac/statusbar/install.py --upgrade --shared-desktop /Applications/ChatGPT.app
+```
+
+首次安装时省去 `--upgrade`。安装或升级需要 Xcode 命令行工具。继续使用旧版桌面的 IPC 模式时，省去 `--shared-desktop`。
+
+升级保留登录自启和手机配对。退出旧的状态栏网关并重新打开「Codex网关.app」后，本次登录即可使用新版网关。如果桌面已经打开，网关会先按旧方式提供历史读取。等任务结束并退出桌面后，网关会自动用共享模式重新打开桌面。此后登录 Mac 会由状态栏网关启动桌面。网关优先复用运行中的 App Server daemon，否则启动桌面自带的 App Server。
+
+退出共享网关会关闭网关启动的桌面。手机端沿用已配对的安装包。
 
 改动范围：新增状态栏 App 及构建安装脚本；原 `.command` 在 App 存在时打开 App，未安装 App 时保留原来的终端启动方式。未修改网关服务实现、配对数据、网络或 RustDesk。登录自启已注册；尚未通过重启 Mac 实测。
 
