@@ -23,6 +23,10 @@
 
 `scripts/bundle-syntax.py` 从固定 SHA-256 的 npm 归档生成内置资源。Runestone、Tree-sitter 语法的来源记录与许可证位于 `ios/Packages/Runestone/`。
 
+## iOS 数学公式
+
+iOS-LaTeX Light 使用 RaTeX 0.1.16 和 CoreText。iOS-LaTeX 与 RaTeX 使用 MIT 许可证，KaTeX 字体使用 SIL OFL 1.1。内置来源和许可文件随应用发布。[iOS-LaTeX 来源说明](ios/Packages/iOS-LaTeX/UPSTREAM.md)
+
 ## 随网页内置的组件
 
 | 组件 | 版本 | 许可证路径 |

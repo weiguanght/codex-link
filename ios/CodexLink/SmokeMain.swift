@@ -206,6 +206,12 @@ final class NativeSmoke: ObservableObject {
             if let attachment = value as? NSTextAttachment, attachment.image != nil { formulas += 1 }
         }
         try require(formulas == 3, "Inline or display formula was not typeset")
+        try require(!iOSLaTeXEngine.supportsChemistry, "Expected the Light math engine")
+        let wideFormula = NativeLatexRenderer.render(#"U(\mathbf{x}+\boldsymbol{\delta}) \approx U(\mathbf{x})"#,
+                                                     widthLimit: 48, fontSize: 20, textColor: .black,
+                                                     display: true, displayScale: 3)
+        try require(wideFormula.map { $0.image.size.width <= 48 && $0.descent > 0 && $0.descent < $0.image.size.height } == true,
+                    "Formula downscaling lost its width limit or baseline")
         let vectorEquations = NativeMarkdownText.styled(#"""
         \[
         \mathbf x=\mathbf x_0+\boldsymbol{\delta}
@@ -233,7 +239,7 @@ final class NativeSmoke: ObservableObject {
         """#, traits: UITraitCollection())
         var vectorAttachments = 0
         vectorEquations.enumerateAttribute(.attachment, in: NSRange(location: 0, length: vectorEquations.length)) { value, _, _ in
-            if value is FormulaAttachment { vectorAttachments += 1 }
+            if let attachment = value as? NSTextAttachment, attachment.image != nil { vectorAttachments += 1 }
         }
         try require(vectorAttachments == 6, "A bold-vector display equation did not render")
         let blockFormula = NativeMarkdownText.styled(#"$$\sum_{n=1}^{\infty} \frac{1}{n^2}$$"#, traits: UITraitCollection(userInterfaceStyle: .dark))
@@ -242,6 +248,8 @@ final class NativeSmoke: ObservableObject {
         try require(literal.formulas.isEmpty, "Code, currency, escaped math, or a link destination became a formula: " + literal.formulas.values.map(\.source).joined(separator: " | "))
         let fallback = NativeMarkdownText.styled(#"Before $\madeup{x}$ after"#, traits: UITraitCollection())
         try require(fallback.string == #"Before $\madeup{x}$ after"#, "Unsupported formula lost its source")
+        let chemistry = NativeMarkdownText.styled(#"$\ce{H2O}$"#, traits: UITraitCollection())
+        try require(chemistry.string == #"$\ce{H2O}$"#, "Light engine must preserve chemistry source")
         let selectableMessage = SelectableMessageTextView()
         selectableMessage.attributedText = styled
         let range = (styled.string as NSString).range(of: "Start \u{FFFC}.\nNext \u{FFFC}.")

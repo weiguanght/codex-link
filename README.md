@@ -343,9 +343,10 @@ codex-link/
 
 ### 构建 iOS IPA
 
-在已安装完整 Xcode 的 Mac 上执行：
+在已安装完整 Xcode 和 Rust（rustup，已验证 1.95）的 Mac 上执行。
 
 ```sh
+rustup target add aarch64-apple-ios
 ./scripts/build-ios.sh
 ```
 
@@ -354,6 +355,8 @@ codex-link/
 也可以打开 `ios/codex-link.xcodeproj`。采用普通 Apple 签名时，请配置自己的开发者 Team 和适用的 Bundle ID／签名设置，**不要把 `TrollStore.entitlements` 中的合成身份当作真实开发者身份使用**。
 
 Xcode 工程由 `scripts/generate-project.py` 生成；需长期保留的构建设置应同步修改生成脚本，避免下次构建覆盖手动修改。
+
+Xcode 会从源码构建 iOS-LaTeX Light。构建模拟器版本时，Apple Silicon 安装 Rust 目标 `aarch64-apple-ios-sim`，Intel 安装 `x86_64-apple-ios`。
 
 ### 后端与隔离测试
 

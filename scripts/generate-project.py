@@ -13,19 +13,11 @@ def identifier(value):
 def main():
     ios_root = ROOT / 'ios'
     app_group = ios_root / 'CodexLink'
-    microtex = ios_root / 'Packages/MicroTeX'
+    latex = ios_root / 'Packages/iOS-LaTeX'
     files = sorted(app_group.glob('*.swift'))
     objc_files = sorted(app_group.glob('*.m'))
     objcxx_files = sorted(app_group.glob('*.mm'))
     header_files = sorted(app_group.glob('*.h'))
-    engine_src = microtex / 'src'
-    engine_files = sorted(
-        file for folder in ('atom', 'box', 'core', 'fonts', 'res', 'utils')
-        for file in (engine_src / folder).rglob('*.cpp')
-    )
-    engine_files.extend((engine_src / 'latex.cpp', engine_src / 'render.cpp',
-                         microtex / 'third_party/tinyxml2/tinyxml2.cpp',
-                         engine_src / 'platform/apple/graphic_apple.mm'))
     objects = []
     def obj(name, value):
         objects.append(f'{identifier(name)} = {{ {value} }};')
@@ -39,11 +31,10 @@ def main():
         obj(build, f'isa = PBXBuildFile; fileRef = {identifier(ref)};')
         refs.append(identifier(ref))
         builds.append(identifier(build))
-    for file in engine_files:
-        relative = file.relative_to(microtex).as_posix()
-        ref, build = 'ref:MicroTeX/' + relative, 'build:MicroTeX/' + relative
-        file_type = 'sourcecode.cpp.objcpp' if file.suffix == '.mm' else 'sourcecode.cpp.cpp'
-        obj(ref, f'isa = PBXFileReference; lastKnownFileType = {file_type}; path = "{relative}"; sourceTree = "<group>";')
+    for file in sorted((latex / 'Swift').glob('*.swift')):
+        relative = file.relative_to(latex).as_posix()
+        ref, build = 'ref:iOS-LaTeX/' + relative, 'build:iOS-LaTeX/' + relative
+        obj(ref, f'isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "{relative}"; sourceTree = "<group>";')
         obj(build, f'isa = PBXBuildFile; fileRef = {identifier(ref)};')
         engine_refs.append(identifier(ref))
         builds.append(identifier(build))
@@ -58,15 +49,24 @@ def main():
     obj('syntaxassets', 'isa = PBXFileReference; lastKnownFileType = folder; path = SyntaxAssets; sourceTree = "<group>";')
     obj('syntaxassetsbuild', f'isa = PBXBuildFile; fileRef = {identifier("syntaxassets")};')
     refs.append(identifier('syntaxassets'))
-    obj('microtexres', 'isa = PBXFileReference; lastKnownFileType = folder; path = Packages/MicroTeX/res; sourceTree = SOURCE_ROOT;')
-    obj('microtexresbuild', f'isa = PBXBuildFile; fileRef = {identifier("microtexres")};')
-    refs.append(identifier('microtexres'))
+    obj('latexfonts', 'isa = PBXFileReference; lastKnownFileType = folder; path = Fonts; sourceTree = "<group>";')
+    obj('latexfontsbuild', f'isa = PBXBuildFile; fileRef = {identifier("latexfonts")};')
+    engine_refs.append(identifier('latexfonts'))
+    obj('latexnotices', 'isa = PBXFileReference; lastKnownFileType = folder; path = iOSLaTeXNotices; sourceTree = "<group>";')
+    obj('latexnoticesbuild', f'isa = PBXBuildFile; fileRef = {identifier("latexnotices")};')
+    engine_refs.append(identifier('latexnotices'))
     obj('sourcegroup', f'isa = PBXGroup; path = CodexLink; sourceTree = "<group>"; children = ({",".join(refs)},);')
-    obj('microtexgroup', f'isa = PBXGroup; name = MicroTeX; path = Packages/MicroTeX; sourceTree = SOURCE_ROOT; children = ({",".join(engine_refs)},);')
+    obj('latexgroup', f'isa = PBXGroup; name = "iOS-LaTeX"; path = "Packages/iOS-LaTeX"; sourceTree = SOURCE_ROOT; children = ({",".join(engine_refs)},);')
     obj('products', f'isa = PBXGroup; name = Products; sourceTree = "<group>"; children = ({identifier("app")},);')
-    obj('main', f'isa = PBXGroup; sourceTree = "<group>"; children = ({identifier("sourcegroup")},{identifier("microtexgroup")},{identifier("products")},);')
+    obj('main', f'isa = PBXGroup; sourceTree = "<group>"; children = ({identifier("sourcegroup")},{identifier("latexgroup")},{identifier("products")},);')
     obj('sources', f'isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ({",".join(builds)},); runOnlyForDeploymentPostprocessing = 0;')
-    obj('resources', f'isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ({identifier("assetsbuild")},{identifier("syntaxassetsbuild")},{identifier("microtexresbuild")},); runOnlyForDeploymentPostprocessing = 0;')
+    obj('resources', f'isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ({identifier("assetsbuild")},{identifier("syntaxassetsbuild")},{identifier("latexfontsbuild")},{identifier("latexnoticesbuild")},); runOnlyForDeploymentPostprocessing = 0;')
+    obj('buildlatex', r'''isa = PBXShellScriptBuildPhase; buildActionMask = 2147483647;
+        name = "Build iOS-LaTeX Light"; files = (); alwaysOutOfDate = 1;
+        outputPaths = ("$(DERIVED_FILE_DIR)/libios_latex.a",);
+        runOnlyForDeploymentPostprocessing = 0; shellPath = /bin/bash;
+        shellScript = "bash \"$SRCROOT/../scripts/build-ios-latex.sh\"";
+        showEnvVarsInLog = 0;''')
     packages = ['Runestone', 'RunestoneLanguageSupport']
     obj('editorpackage', 'isa = XCLocalSwiftPackageReference; relativePath = Packages/Runestone;')
     for product in packages:
@@ -80,12 +80,11 @@ def main():
             INFOPLIST_FILE = CodexLink/Info.plist; GENERATE_INFOPLIST_FILE = NO;
             TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_STYLE = Automatic;
             SWIFT_VERSION = 5.0; IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-            CLANG_CXX_LANGUAGE_STANDARD = "c++17"; GCC_ENABLE_CPP_EXCEPTIONS = YES;
-            HEADER_SEARCH_PATHS = ("$(inherited)","$(PROJECT_DIR)/Packages/MicroTeX/src","$(PROJECT_DIR)/Packages/MicroTeX/third_party/tinyxml2",);
-            SWIFT_OBJC_BRIDGING_HEADER = CodexLink/NativeLatexRenderer.h;
-            OTHER_LDFLAGS = "$(inherited) -framework CoreText";
+            SWIFT_INCLUDE_PATHS = ("$(inherited)","$(PROJECT_DIR)/Packages/iOS-LaTeX/Native/include",);
+            LIBRARY_SEARCH_PATHS = ("$(inherited)","$(DERIVED_FILE_DIR)",);
+            OTHER_LDFLAGS = "$(inherited) -lios_latex -framework Security";
             SWIFT_OPTIMIZATION_LEVEL = {"-Onone" if name == "Debug" else "-O"};
-            ENABLE_USER_SCRIPT_SANDBOXING = YES;
+            ENABLE_USER_SCRIPT_SANDBOXING = NO;
             ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
             LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
         }};''')
@@ -94,7 +93,7 @@ def main():
     obj('target', f'''isa = PBXNativeTarget; name = "codex-link"; productName = CodexLink;
         productType = "com.apple.product-type.application"; productReference = {identifier('app')};
         buildConfigurationList = {identifier('targetconfigs')};
-        buildPhases = ({identifier('sources')},{identifier('frameworks')},{identifier('resources')},);
+        buildPhases = ({identifier('buildlatex')},{identifier('sources')},{identifier('frameworks')},{identifier('resources')},);
         buildRules = (); dependencies = (); packageProductDependencies = ({",".join(identifier("packageproduct:" + p) for p in packages)},);''')
     obj('uitestref', 'isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeFlows.swift; sourceTree = "<group>";')
     obj('uitestbuild', f'isa = PBXBuildFile; fileRef = {identifier("uitestref")};')

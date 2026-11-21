@@ -108,7 +108,7 @@ enum NativeMarkdownText {
                 let replacement: NSAttributedString
                 if let attachment = FormulaAttachment(formula, size: size,
                                                        color: color.resolvedColor(with: traits),
-                                                       width: availableWidth) {
+                                                       width: availableWidth, displayScale: traits.displayScale) {
                     replacement = NSAttributedString(attachment: attachment)
                 } else {
                     replacement = NSAttributedString(string: formula.source, attributes: [.font: UIFont.systemFont(ofSize: size), .foregroundColor: color])
@@ -138,16 +138,15 @@ enum NativeMarkdownText {
 private final class FormulaAttachment: NSTextAttachment {
     let source: String
 
-    init?(_ formula: NativeMarkdownMath.Formula, size: CGFloat, color: UIColor, width: CGFloat) {
-        guard formula.latex.count <= 1_000 else { return nil }
+    init?(_ formula: NativeMarkdownMath.Formula, size: CGFloat, color: UIColor, width: CGFloat, displayScale: CGFloat) {
         guard let rendered = NativeLatexRenderer.render(formula.latex, widthLimit: width,
                                                          fontSize: size, textColor: color,
-                                                         display: formula.display),
-              rendered.image.size.width > 0, rendered.image.size.height > 0 else { return nil }
+                                                         display: formula.display, displayScale: displayScale)
+        else { return nil }
         source = formula.source
         super.init(data: nil, ofType: nil)
         image = rendered.image
-        bounds = CGRect(x: 0, y: -rendered.baseline,
+        bounds = CGRect(x: 0, y: -rendered.descent,
                         width: rendered.image.size.width, height: rendered.image.size.height)
     }
 

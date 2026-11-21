@@ -1,0 +1,4 @@
+module iOSLaTeXFFI {
+    header "iOSLaTeXFFI.h"
+    export *
+}

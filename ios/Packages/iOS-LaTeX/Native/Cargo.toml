@@ -1,0 +1,29 @@
+[workspace]
+resolver = "2"
+members = ["crates/ratex-types", "crates/ratex-font", "crates/ratex-lexer", "crates/ratex-parser", "crates/ratex-layout", "ios-latex"]
+
+[workspace.package]
+version = "0.1.16"
+edition = "2021"
+authors = ["RaTeX Contributors"]
+license = "MIT"
+repository = "https://github.com/weiguanght/iOS-LaTeX"
+homepage = "https://github.com/weiguanght/iOS-LaTeX"
+documentation = "https://github.com/weiguanght/iOS-LaTeX#readme"
+
+[workspace.dependencies]
+ratex-types = { path = "crates/ratex-types" }
+ratex-font = { path = "crates/ratex-font" }
+ratex-lexer = { path = "crates/ratex-lexer" }
+ratex-parser = { path = "crates/ratex-parser", default-features = false }
+ratex-layout = { path = "crates/ratex-layout", default-features = false }
+phf = { version = "0.13", features = ["macros"] }
+thiserror = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "debuginfo"

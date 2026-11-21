@@ -1,0 +1,25 @@
+[package]
+name = "ratex-layout"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+description = "Layout engine for RaTeX"
+
+[features]
+default = ["mhchem"]
+## mhchem chemistry extension (`\ce`, `\pu`); forwards to `ratex-parser/mhchem`.
+mhchem = ["ratex-parser/mhchem"]
+
+[dependencies]
+ratex-types  = { workspace = true }
+ratex-font   = { workspace = true }
+ratex-parser = { workspace = true }
+serde_json   = { workspace = true }
+
+[[bin]]
+name = "ratex-layout"
+path = "src/bin/layout.rs"
+

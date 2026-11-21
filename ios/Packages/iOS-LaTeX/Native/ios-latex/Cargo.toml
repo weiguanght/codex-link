@@ -1,0 +1,20 @@
+[package]
+name = "ios-latex"
+version = "0.1.0"
+edition.workspace = true
+license = "MIT"
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[features]
+default = ["mhchem"]
+mhchem = ["ratex-parser/mhchem", "ratex-layout/mhchem"]
+
+[dependencies]
+ratex-parser.workspace = true
+ratex-layout.workspace = true
+ratex-types.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

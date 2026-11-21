@@ -1,5 +1,10 @@
 # 验证记录
 
+## iOS-LaTeX Light 公式渲染（2026-11-21）
+
+- 从 iOS-LaTeX 源码编译 Light 版并静态链接到 arm64 iOS 应用。Mac 上的 Light 版通过 7 项测试，涵盖六条原式的位图、粗斜体希腊字母、导数圆点及未知命令。Full 参考语料测试按预期跳过。结果见 `build/ios-latex/host-tests.log`。
+- arm64 Release、TrollStore 签名及归档校验通过。IPA 内含 20 个 KaTeX 字体及许可文件。与上一版相比，IPA 由 7.48 MiB 降至 7.41 MiB，解包由 51.53 MiB 降至 50.21 MiB。构建日志与对比数据位于 `build/ios-latex/`。iPhone 会话显示和滚动待实机验证。
+
 ## 新版桌面随状态栏网关启动（2026-11-21）
 
 - 本机「Codex网关.app」升级至 1.1，沿用原 LaunchAgent 和配对目录。通过 launchctl 启动后，状态栏进程运行正常，18443 上的 HTTPS 身份接口返回 200。已打开的生产桌面继续运行。
