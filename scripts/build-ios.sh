@@ -14,10 +14,15 @@ APP_OUTPUT="$ROOT/build/iphoneos/CodexLink.app"
 # Recreate the app bundle so removed package resources cannot survive an incremental build.
 rm -rf -- "$APP_OUTPUT"
 xcodebuild -project "$ROOT/ios/codex-link.xcodeproj" -target codex-link \
-  -configuration Release -sdk iphoneos \
+  -configuration Release -sdk iphoneos ARCHS=arm64e ONLY_ACTIVE_ARCH=NO \
   CONFIGURATION_BUILD_DIR="$ROOT/build/iphoneos" \
   SYMROOT="$ROOT/build/products" OBJROOT="$ROOT/build/intermediates" \
   CODE_SIGNING_ALLOWED=NO build
+actual_archs="$(xcrun lipo -archs "$APP_OUTPUT/CodexLink")"
+if [ "$actual_archs" != arm64e ]; then
+  echo "Expected an arm64e IPA executable, found $actual_archs." >&2
+  exit 1
+fi
 STAGE="$(mktemp -d "$ROOT/build/package.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
 mkdir "$STAGE/Payload"

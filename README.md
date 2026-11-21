@@ -130,7 +130,7 @@ codex-link 是一个基于 [codex-mobile-bridge](https://github.com/try2love/cod
 
 ### 手机与网络
 
-- iOS / iPadOS **16.0+**，arm64 设备。
+- iOS / iPadOS **16.0+**。脚本生成的 IPA 使用 arm64e，需要 A12 或更新芯片。
 - 使用适合自己设备的 IPA 安装方式；TrollStore 本身还受设备和系统版本限制。
 - 首次配对时，手机与 Mac 位于可以互访的同一 IPv4 局域网，并允许 App 访问本地网络。
 - 外网直连需要 Mac 拥有可达的公网 IPv6，且手机当前网络支持访问该 IPv6。
@@ -346,17 +346,17 @@ codex-link/
 在已安装完整 Xcode 和 Rust（rustup，已验证 1.95）的 Mac 上执行。
 
 ```sh
-rustup target add aarch64-apple-ios
+rustup component add rust-src
 ./scripts/build-ios.sh
 ```
 
-脚本从 `Info.plist` 读取版本，生成图标和 Xcode 工程，编译 arm64 Release，并输出未签名与 TrollStore 两种 IPA。脚本检查归档完整性和 TrollStore ad-hoc 签名，成功后原子更新 IPA 与 `SHA256SUMS.txt`。无需 CocoaPods、npm 或 xcodegen。
+脚本从 `Info.plist` 读取版本，生成图标和 Xcode 工程，编译 arm64e Release，并输出未签名与 TrollStore 两种 IPA。脚本检查架构、归档完整性和 TrollStore ad-hoc 签名，成功后原子更新 IPA 与 `SHA256SUMS.txt`。无需 CocoaPods、npm 或 xcodegen。
 
 也可以打开 `ios/codex-link.xcodeproj`。采用普通 Apple 签名时，请配置自己的开发者 Team 和适用的 Bundle ID／签名设置，**不要把 `TrollStore.entitlements` 中的合成身份当作真实开发者身份使用**。
 
 Xcode 工程由 `scripts/generate-project.py` 生成；需长期保留的构建设置应同步修改生成脚本，避免下次构建覆盖手动修改。
 
-Xcode 会从源码构建 iOS-LaTeX Light。构建模拟器版本时，Apple Silicon 安装 Rust 目标 `aarch64-apple-ios-sim`，Intel 安装 `x86_64-apple-ios`。
+Xcode 会从源码构建 iOS-LaTeX Light。arm64e 构建使用 `rust-src` 编译 Rust 标准库。直接在 Xcode 构建 arm64 真机版本时，安装 Rust 目标 `aarch64-apple-ios`。构建模拟器版本时，Apple Silicon 安装 `aarch64-apple-ios-sim`，Intel 安装 `x86_64-apple-ios`。
 
 ### 后端与隔离测试
 
@@ -384,7 +384,7 @@ python3 scripts/test-standalone.py
 
 | 验证项目 | 结果 |
 | --- | --- |
-| iOS arm64 Release 构建 | 通过 |
+| iOS arm64e Release 构建 | 通过 |
 | TrollStore 包 ad-hoc 签名完整性检查 | 通过，不代表真机安装已验证 |
 | 全量 Python 后端、历史读取、项目操作、设置与工作区测试 | 132 项通过（2026-11-09，隔离环境） |
 | 无外部上游目录的隔离运行测试 | 通过 |

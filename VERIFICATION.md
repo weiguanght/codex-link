@@ -1,5 +1,10 @@
 # 验证记录
 
+## arm64e 真机 IPA（2026-11-21）
+
+- Xcode 15.2 编译 arm64e Release，iOS-LaTeX Light 静态库与 Runestone 对象文件的架构均为 arm64e。解包确认两个 IPA 的主程序均为单架构 arm64e，最低系统版本为 iOS 16.0。
+- TrollStore ad-hoc 签名和两个 IPA 的 SHA-256 校验通过。构建日志位于 `build/ios-latex/ipa-arm64e.log`。真机安装和运行待验证。
+
 ## iOS-LaTeX Light 公式渲染（2026-11-21）
 
 - 从 iOS-LaTeX 源码编译 Light 版并静态链接到 arm64 iOS 应用。Mac 上的 Light 版通过 7 项测试，涵盖六条原式的位图、粗斜体希腊字母、导数圆点及未知命令。Full 参考语料测试按预期跳过。结果见 `build/ios-latex/host-tests.log`。
