@@ -209,12 +209,14 @@ def computer_use_approval(params):
 
 def normalize_request(request):
     result = {"id": request.get("id"), "method": request.get("method"), "params": {}}
+    if request.get('submitted') is True:
+        result['submitted'] = True
     params = request.get("params", {})
     method = request.get("method")
     fields = {
-        "item/commandExecution/requestApproval": ("command", "cwd", "reason", "availableDecisions", "networkApprovalContext"),
-        "item/fileChange/requestApproval": ("reason", "grantRoot", "changes"),
-        "item/permissions/requestApproval": ("reason", "permissions"),
+        "item/commandExecution/requestApproval": ("command", "cwd", "reason", "availableDecisions", "networkApprovalContext", "additionalPermissions", "kind", "environmentId"),
+        "item/fileChange/requestApproval": ("reason", "grantRoot", "changes", "availableDecisions"),
+        "item/permissions/requestApproval": ("reason", "permissions", "cwd", "environmentId"),
         "item/tool/requestUserInput": ("questions",),
         "tool/requestUserInput": ("questions",),
         "item/plan/requestImplementation": ("turnId", "planContent"),

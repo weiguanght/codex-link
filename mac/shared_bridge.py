@@ -116,10 +116,8 @@ class SharedDesktopBridge(Bridge):
                          if row.get('host') == 'local' and isinstance(row.get('id'), str) and not row.get('deleted'))
 
     def _shared_event(self, message):
-        # Server-initiated approvals and input requests are handled in the GUI.
-        if 'id' in message:
-            return
         method, params = message['method'], message.get('params') or {}
+        request_event = 'id' in message or method == 'serverRequest/resolved'
         with self.lock:
             session = self.live.get(params.get('threadId'))
         if session is None:
@@ -128,13 +126,22 @@ class SharedDesktopBridge(Bridge):
             if session.discovering:
                 # The snapshot may already include these chunks. Complete
                 # items carry their full text and can safely be applied twice.
-                if method not in DELTAS:
+                if method not in DELTAS and not request_event:
                     session.shared_events.append((method, params))
             elif session.connected:
                 if method in ('thread/closed', 'thread/archived', 'thread/deleted'):
                     self._invalidate(session, '会话已关闭、归档或删除。')
+                elif request_event:
+                    session.state['requests'] = self.ipc.requests(session.id)
+                    session.changed()
                 elif update_event(session.state, method, params):
                     session.changed()
+
+    def _invalidate(self, session, message):
+        with session.condition:
+            if session.state is not None:
+                session.state['requests'] = []
+            super()._invalidate(session, message)
 
     def _snapshot(self, thread_id, *, resume=False, limit=20):
         params = {'threadId': thread_id}
@@ -191,6 +198,7 @@ class SharedDesktopBridge(Bridge):
                             raise IPCError('会话已关闭、归档或删除。')
                         update_event(state, method, payload)
                     session.state = state
+                    session.state['requests'] = self.ipc.requests(session.id)
                     session.connected = True
                     session.activity_only = False
                     session.owner = self.ipc.client_id
@@ -220,6 +228,16 @@ class SharedDesktopBridge(Bridge):
             allowed = ('openai',) if row['kind'] == 'chatgpt' else ('openai', 'bridge_api')
             if session.view().get('provider') not in allowed:
                 raise ValueError('此聊天保留了原提供商，请切回对应接入或新建聊天')
+        if method in ('thread-follower-command-approval-decision', 'thread-follower-file-approval-decision',
+                      'thread-follower-permissions-request-approval-response', 'thread-follower-submit-user-input',
+                      'thread-follower-submit-mcp-server-elicitation-response'):
+            response = {'decision': params['decision']} if 'decision' in params else params['response']
+            try:
+                return self.ipc.respond(session.id, params['requestId'], response)
+            finally:
+                with session.condition:
+                    session.state['requests'] = self.ipc.requests(session.id)
+                    session.changed()
         if method == 'thread-follower-start-turn':
             payload = params['turnStart']
             request = dict(payload['request'])
@@ -284,7 +302,9 @@ class SharedDesktopBridge(Bridge):
         raise IPCError('共享桌面模式请在 Mac 管理目标。')
 
     def respond(self, thread_id, request_id, response):
-        raise IPCError('共享桌面模式请在 Mac 处理审批和问题。')
+        if not isinstance(response, dict):
+            raise ValueError('回应格式无效')
+        return super().respond(thread_id, request_id, response)
 
     def message_action(self, thread_id, body):
         raise IPCError('共享桌面模式请在 Mac 编辑消息或创建分支。')

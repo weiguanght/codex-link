@@ -1630,7 +1630,7 @@ class Bridge:
             if decision not in ("accept", "decline", "cancel"):
                 raise ValueError("只支持本次批准、拒绝或取消")
             available = params.get("availableDecisions")
-            if available and decision not in available:
+            if available is not None and decision not in available:
                 raise ValueError("该审批不支持所选操作")
             payload["decision"] = decision
         elif method == "item/permissions/requestApproval":
@@ -1642,7 +1642,7 @@ class Bridge:
             if not isinstance(answers, dict):
                 raise ValueError("请填写问题答案")
             allowed_ids = {q["id"] for q in params.get("questions", [])}
-            if not allowed_ids or set(answers) != allowed_ids or any(not isinstance(v, list) or not v or not all(isinstance(s, str) and len(s) <= 20000 for s in v) for v in answers.values()):
+            if not allowed_ids or set(answers) != allowed_ids or any(not isinstance(v, list) or not v or not all(isinstance(s, str) and s.strip() and len(s) <= 20000 for s in v) for v in answers.values()):
                 raise ValueError("答案不完整或格式不正确")
             payload["response"] = {"answers": {k: {"answers": v} for k, v in answers.items()}}
         else:

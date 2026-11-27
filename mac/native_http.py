@@ -13,7 +13,7 @@ WORKSPACE = re.compile(r'^/api/native/v1/threads/([0-9a-f-]{36})/workspace/(tree
 
 def capabilities(row, shared_desktop=False):
     control = not row.get('readOnly', True)
-    return {'readOnly': not control, 'send': control, 'stop': control, 'respond': control and not shared_desktop,
+    return {'readOnly': not control, 'send': control, 'stop': control, 'respond': control,
             'attachments': control, 'rename': control, 'threadSettings': control,
             'archive': control and row.get('host') == 'local', 'pin': True, 'hide': True,
             'permanentDelete': row.get('host') == 'local',

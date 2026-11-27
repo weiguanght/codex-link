@@ -18,7 +18,8 @@ class NativeHTTPTests(unittest.TestCase):
     def test_shared_deletion_capability_matches_local_write_route(self):
         row = {'host': 'local', 'readOnly': False}
         self.assertTrue(capabilities(row, shared_desktop=True)['permanentDelete'])
-        self.assertFalse(capabilities(row, shared_desktop=True)['respond'])
+        self.assertTrue(capabilities(row, shared_desktop=True)['respond'])
+        self.assertFalse(capabilities(dict(row, readOnly=True), shared_desktop=True)['respond'])
         self.assertTrue(capabilities(dict(row, readOnly=True), shared_desktop=True)['permanentDelete'])
         self.assertFalse(capabilities(dict(row, host='ssh-test'), shared_desktop=True)['permanentDelete'])
 

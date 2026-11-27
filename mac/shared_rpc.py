@@ -1,11 +1,13 @@
 """Local app-server WebSocket used by the explicitly launched desktop."""
 from concurrent.futures import Future, TimeoutError
+import copy
 import json
 import logging
 import os
 from pathlib import Path
 import stat
 import threading
+import uuid
 
 from bridge.ipc import IPCError
 
@@ -53,6 +55,8 @@ class SharedRPC:
         self.client_id = None
         self.counter = 0
         self.pending = {}
+        self.server_requests = {}
+        self.server_request_ids = {}
 
     def connect(self):
         with self.connect_lock:
@@ -67,7 +71,7 @@ class SharedRPC:
                 threading.Thread(target=self._read, args=(ws,), daemon=True).start()
                 result = self._request('initialize', {
                     'clientInfo': {'name': 'codex_link', 'version': '0.1.0'},
-                    'capabilities': {'experimentalApi': True},
+                    'capabilities': {'experimentalApi': True, 'requiredHumanApproval': True},
                 }, 5)
                 if Path(result['codexHome']).resolve() != self.home:
                     raise IPCError('共享 App Server 的 Codex 数据目录不一致。')
@@ -89,10 +93,12 @@ class SharedRPC:
             for raw in ws:
                 message = json.loads(raw)
                 if 'method' in message:
-                    self.event(message)
+                    message = self._server_event(ws, message)
+                    if message is not None:
+                        self.event(message)
                 else:
                     with self.lock:
-                        future = self.pending.pop(message.get('id'), None)
+                        future = self.pending.pop(message.get('id'), None) if self.socket is ws else None
                         if future is not None:
                             future.set_result(message)
         except ConnectionClosed:
@@ -106,12 +112,87 @@ class SharedRPC:
                     for future in self.pending.values():
                         future.set_exception(IPCError('共享 App Server 已断开，请检查会话后再决定是否重发。'))
                     self.pending.clear()
+                    self.server_requests.clear()
+                    self.server_request_ids.clear()
                     lost = True
                 else:
                     lost = False
             if lost:
                 self.disconnect()
             ws.close()
+
+    def _server_event(self, ws, message):
+        """Keep replayed requests independently of a chat's history snapshot.
+
+        Public IDs are connection-scoped opaque tokens, never wire request IDs.
+        A phone holding an old card cannot answer a reused ID after reconnect.
+        """
+        with self.lock:
+            if self.socket is not ws:
+                return None
+            method, params = message['method'], message.get('params') or {}
+            if 'id' in message:
+                identifier = message['id']
+                if (type(identifier) not in (int, str) or not isinstance(params, dict)
+                        or not isinstance(params.get('threadId'), str)):
+                    # Authentication ceremonies and other global requests stay
+                    # with the desktop. Never forward their challenge data.
+                    return None
+                key = json.dumps(identifier)
+                public_id = self.server_request_ids.get(key)
+                if public_id is None:
+                    public_id = 'shared:' + uuid.uuid4().hex
+                    self.server_request_ids[key] = public_id
+                    self.server_requests[public_id] = {
+                        'wireId': identifier,
+                        'request': {**copy.deepcopy(message), 'id': public_id},
+                    }
+                return copy.deepcopy(self.server_requests[public_id]['request'])
+            if method == 'serverRequest/resolved':
+                key = json.dumps(params.get('requestId'))
+                public_id = self.server_request_ids.get(key)
+                entry = self.server_requests.get(public_id)
+                if entry is None or entry['request']['params']['threadId'] != params.get('threadId'):
+                    return None
+                del self.server_request_ids[key]
+                del self.server_requests[public_id]
+                return {**message, 'params': {**params, 'requestId': public_id}}
+            if method in ('thread/closed', 'thread/archived', 'thread/deleted'):
+                self._forget_requests(params.get('threadId'))
+            return message
+
+    def _forget_requests(self, thread_id):
+        for public_id, entry in list(self.server_requests.items()):
+            if entry['request']['params']['threadId'] == thread_id:
+                del self.server_request_ids[json.dumps(entry['wireId'])]
+                del self.server_requests[public_id]
+
+    def requests(self, thread_id):
+        with self.lock:
+            return [dict(copy.deepcopy(entry['request']), submitted='response' in entry)
+                    for entry in self.server_requests.values()
+                    if entry['request']['params']['threadId'] == thread_id]
+
+    def respond(self, thread_id, request_id, response):
+        # Do not connect here: resuming a connection must not replay a decision.
+        with self.lock:
+            entry = self.server_requests.get(request_id) if isinstance(request_id, str) else None
+            if entry is None or entry['request']['params']['threadId'] != thread_id:
+                raise ValueError('此请求已处理或已过期，请刷新会话')
+            if 'response' in entry:
+                if entry['response'] != response:
+                    raise ValueError('此请求已经提交了不同回应，请等待处理结果')
+                return {'ok': True, 'status': 'submitted', 'duplicate': True}
+            if self.socket is None or self.client_id is None:
+                raise IPCError('共享 App Server 已断开，请刷新会话')
+            entry['response'] = copy.deepcopy(response)
+            try:
+                self.socket.send(json.dumps({'id': entry['wireId'], 'result': response}, ensure_ascii=False))
+            except Exception as exc:
+                # The server may already have consumed the frame. Keep this
+                # request marked submitted until resolution or a fresh replay.
+                raise IPCError('回应结果未确认，请刷新会话后检查，不要重复提交。') from exc
+            return {'ok': True, 'status': 'submitted'}
 
     def _request(self, method, params, timeout):
         future = Future()
@@ -149,6 +230,8 @@ class SharedRPC:
     def follow(self, session_id, owner=None, subscribe=True, host='local'):
         if not subscribe and self.client_id:
             self.request('thread/unsubscribe', {'threadId': session_id}, timeout=3)
+            with self.lock:
+                self._forget_requests(session_id)
 
     def close(self):
         with self.lock:

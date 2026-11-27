@@ -201,7 +201,9 @@ final class ChatModel: ObservableObject {
     private var detailLoads: [String: Task<Void, Error>] = [:]
     private var diffStats: [String: (version: JSONValue, value: NativeDiffStats)] = [:]
     private var diffLoads = Set<String>()
-    private var responded = Set<String>()
+    @Published private var responded = Set<String>()
+    @Published private var responding = Set<String>()
+    private var requestDrafts: [String: NativeRequestDraft] = [:]
     private var autoSend = Set<String>()
     private let draftStore: DraftStore
     private var draftScope: String?
@@ -262,6 +264,7 @@ final class ChatModel: ObservableObject {
     var running: Bool { meta["status"].string == "active" }
     var canSend: Bool { connected && !busy && (!draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !draft.attachments.isEmpty) }
     var requests: [JSONValue] { readOnly ? [] : meta["requests"].array }
+    var canRespond: Bool { connected && capabilities["respond"].bool }
     var visibleRows: [NativeRow] {
         let mainKeys = Set(rows.map(\.key))
         return rows.flatMap { row in
@@ -365,7 +368,13 @@ final class ChatModel: ObservableObject {
             diffStats[row.key] = (row.version, value); revision += 1
         } catch { /* Opening the detail page offers an explicit retry on failure. */ }
     }
-    func wasResponded(_ request: JSONValue) -> Bool { responded.contains(request["id"].identifier) }
+    func wasResponded(_ request: JSONValue) -> Bool { request["submitted"].bool || responded.contains(request["id"].identifier) }
+    func isResponding(_ request: JSONValue) -> Bool { responding.contains((session?.identity ?? "") + "|" + request["id"].identifier) }
+    func requestDraft(_ request: JSONValue) -> NativeRequestDraft {
+        let id = request["id"].identifier
+        if let draft = requestDrafts[id] { return draft }
+        let draft = NativeRequestDraft(); requestDrafts[id] = draft; return draft
+    }
     private func params(for target: LinkSession) -> [String: String] { ["host": target.host, "view": logView ? "log" : "live", "projection": "turns"] }
     private func rowExists(_ row: NativeRow) -> Bool {
         rows.contains(where: { $0.key == row.key && $0.version == row.version }) ||
@@ -400,6 +409,7 @@ final class ChatModel: ObservableObject {
         session = target
         error = ""; pollingError = ""
         if !canResumeTimeline {
+            requestDrafts = [:]; responded = []
             rows = []; files = []; details = [:]; processCache = [:]; processLoadingTurns = []; processErrors = [:]; processExpansionOverrides = [:]; diffStats = [:]; meta = .null; capabilities = .null; epoch = ""; sequence = -1; before = nil; notice = ""; responded = []; loadingOlder = false
             loadedLogView = nil
             isRestoringDraft = true
@@ -483,6 +493,10 @@ final class ChatModel: ObservableObject {
         if !older || replace {
             if meta != page.meta { meta = page.meta }
             if capabilities != page.capabilities { capabilities = page.capabilities }
+            let pending = Set(page.meta["requests"].array.map { $0["id"].identifier })
+            requestDrafts = requestDrafts.filter { pending.contains($0.key) }
+            let remaining = responded.intersection(pending)
+            if remaining != responded { responded = remaining }
             sequence = page.sequence
         }
         if replace || older {
@@ -620,8 +634,18 @@ final class ChatModel: ObservableObject {
     }
     func respond(_ request: JSONValue, response: JSONValue) async throws {
         let id = request["id"]
-        guard !responded.contains(id.identifier) else { return }
-        _ = try await action("respond", body: json(["requestId": id, "response": response]))
+        guard canRespond, let target = session else { throw LinkError.message("请先连接支持手机回应的 Mac 网关") }
+        guard !wasResponded(request) else { return }
+        guard requests.contains(where: { $0["id"] == id }) else { throw LinkError.message("此请求已处理或已过期，请刷新会话") }
+        let key = target.identity + "|" + id.identifier, token = generation
+        guard responding.insert(key).inserted else { return }
+        defer { responding.remove(key) }
+        let result = try await api.value(actionPath("respond", for: target), query: ["host": target.host], body: json(["requestId": id, "response": response]))
+        guard isCurrent(target, generation: token) else { return }
+        if result["status"].string == "unknown" || result["confirmed"] == .bool(false) {
+            responded.insert(id.identifier)
+            throw LinkError.message("回应结果未确认，请刷新会话后检查，不要重复提交。")
+        }
         responded.insert(id.identifier); revision += 1
     }
     func preserveDraft(_ text: String, for target: LinkSession) { primeDraft(text, for: target); autoSend.remove(target.identity) }
@@ -631,7 +655,7 @@ final class ChatModel: ObservableObject {
         flushDraft()
         return true
     }
-    func clear() { detailLoads.values.forEach { $0.cancel() }; detailLoads = [:]; diffLoads = []; details = [:]; processCache = [:]; processLoadingTurns = []; processErrors = [:]; processExpansionOverrides = [:]; diffStats = [:]; flushDraft(); draftSaveTask?.cancel(); draftSaveTask = nil; generation += 1; sending = []; autoSend = []; drafts = [:]; session = nil; draft = ChatDraft(); rows = []; meta = .null; files = []; loadedLogView = nil; logView = false }
+    func clear() { detailLoads.values.forEach { $0.cancel() }; detailLoads = [:]; diffLoads = []; details = [:]; processCache = [:]; processLoadingTurns = []; processErrors = [:]; processExpansionOverrides = [:]; diffStats = [:]; flushDraft(); draftSaveTask?.cancel(); draftSaveTask = nil; generation += 1; sending = []; autoSend = []; drafts = [:]; requestDrafts = [:]; responded = []; responding = []; session = nil; draft = ChatDraft(); rows = []; meta = .null; files = []; loadedLogView = nil; logView = false }
 }
 
 enum NativeSendMode {

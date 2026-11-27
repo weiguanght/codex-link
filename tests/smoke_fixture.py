@@ -103,6 +103,9 @@ class NativeFixture(SpyBridge):
         self.user_message = '请完善远程会话的原生界面。'
         self.process_reads = 0
         self.process_running = False
+        self.interaction_requests = None
+        self.interaction_report = []
+        self.interaction_resolve_at = None
     def session(self, key, **_):
         self.store.get(key)
         return self.live.setdefault(key, LiveSession(key))
@@ -142,8 +145,18 @@ class NativeFixture(SpyBridge):
                 rows.append(dict(key='scroll-background', role='assistant', kind='agentMessage',
                                  text='Synthetic background update' if stage == 1 else 'Synthetic background update complete',
                                  order=4, version=f'v{stage}', truncated=False))
+        if self.interaction_resolve_at is not None and time.monotonic() >= self.interaction_resolve_at:
+            self.interaction_requests = []
+            self.interaction_resolve_at = None
+            self.interaction_report.append('Mac 已处理此请求')
+            self.sequence += 1
+        if self.interaction_requests is not None and self.interaction_report:
+            rows.append(dict(key='mobile-response-report', role='assistant', kind='agentMessage',
+                             text='\n\n'.join(self.interaction_report), order=5, version=str(self.sequence), truncated=False))
         meta = {'id': key, 'title': '优化 Codex Remote 交互', 'cwd': str(project), 'host': 'local', 'model': self.model, 'effort': self.effort, 'provider': 'synthetic', 'connected': self.connected, 'status': 'idle', 'historyComplete': True,
                 'requests': [{'id': 'request-1', 'supported': True, 'method': 'item/commandExecution/requestApproval', 'params': {'command': 'echo synthetic-only', 'reason': '测试原生审批组件'}}], 'submissions': []}
+        if self.interaction_requests is not None:
+            meta['requests'] = copy.deepcopy(self.interaction_requests)
         if mode == 'detail':
             row_key = options['cursor'].split('.')[-1]
             text = TOOL_DETAILS[row_key]
@@ -199,6 +212,36 @@ class NativeFixture(SpyBridge):
         return {'epoch': 'synthetic', 'sequence': self.sequence, 'rows': rows if mode == 'page' or options.get('after') != self.sequence else [], 'before': 'synthetic.u1', 'hasMore': False, 'meta': meta, 'files': ARTIFACT_ROWS}
     def send(self, thread, text, identifier, mode="send", *_, **__):
         self.last_send_mode = mode
+        if text.startswith('Synthetic mobile '):
+            self.interaction_resolve_at = None
+            self.interaction_report = []
+            if text == 'Synthetic mobile inputs':
+                self.interaction_requests = [
+                    {'id': 'mobile-command', 'supported': True, 'method': 'item/commandExecution/requestApproval',
+                     'params': {'command': 'echo mobile-only', 'cwd': str(project), 'reason': '原生移动审批测试'}},
+                    {'id': 'mobile-input', 'supported': True, 'method': 'item/tool/requestUserInput',
+                     'params': {'questions': [
+                         {'id': 'choice', 'header': '选择', 'question': '选择本次处理方式', 'options': [
+                             {'label': 'A', 'description': '第一个选项'}, {'label': 'B', 'description': '第二个选项'}]},
+                         {'id': 'notes', 'header': '说明', 'question': '填写补充说明', 'options': None},
+                     ]}},
+                ]
+            elif text == 'Synthetic mobile approvals':
+                self.interaction_requests = [
+                    {'id': 'mobile-permission', 'supported': True, 'method': 'item/permissions/requestApproval',
+                     'params': {'reason': '仅本轮权限', 'permissions': {'network': {'enabled': True}}}},
+                    {'id': 'mobile-decline', 'supported': True, 'method': 'item/commandExecution/requestApproval',
+                     'params': {'command': 'echo decline-only', 'availableDecisions': ['decline']}},
+                    {'id': 'mobile-cancel', 'supported': True, 'method': 'item/fileChange/requestApproval',
+                     'params': {'reason': '取消文件审批', 'availableDecisions': ['cancel'],
+                                'changes': [{'path': 'example.swift', 'diff': '-old\n+new'}]}},
+                ]
+            elif text == 'Synthetic mobile desktop':
+                self.interaction_requests = [{'id': 'mobile-desktop', 'supported': True, 'method': 'item/commandExecution/requestApproval',
+                                              'params': {'command': 'echo desktop-resolution', 'reason': '等待 Mac 处理'}}]
+                self.interaction_resolve_at = time.monotonic() + 10
+            elif text == 'Synthetic mobile reset':
+                self.interaction_requests = None
         if text == 'Synthetic process running': self.process_running = True
         if text == 'Synthetic process completed': self.process_running = False
         if text == 'Synthetic finished steer race' and mode == 'steer':
@@ -226,7 +269,20 @@ class NativeFixture(SpyBridge):
         self.sequence += 1
         return {'status': 'accepted', 'confirmed': True}
     def interrupt(self, key): self.sequence += 1; return {'ok': True}
-    def respond(self, key, request, response): self.responses.append((key, request, response)); return {'ok': True}
+    def respond(self, key, request, response):
+        self.responses.append((key, request, response))
+        if self.interaction_requests is not None:
+            print('Mobile fixture response:', request, 'answers' if 'answers' in response else response.get('decision'), flush=True)
+            if not any(row['id'] == request for row in self.interaction_requests):
+                raise ValueError('此请求已处理或已过期')
+            self.interaction_requests = [row for row in self.interaction_requests if row['id'] != request]
+            if 'answers' in response:
+                for question, answers in response['answers'].items():
+                    self.interaction_report.append('Mobile ' + question + ': ' + answers[0])
+            else:
+                self.interaction_report.append(request + ': ' + response['decision'])
+            self.sequence += 1
+        return {'ok': True, 'status': 'submitted'}
     def catalog(self, key, refresh=False):
         return {'models': [{'id': 'gpt-5.4', 'name': 'GPT-5.4', 'efforts': ['low', 'medium', 'high'], 'defaultEffort': 'medium'}, {'id': 'synthetic-restricted', 'name': 'Synthetic Restricted', 'efforts': ['minimal', 'high'], 'defaultEffort': 'high'}], 'skills': [], 'sendCount': len(self.submissions), 'lastAttemptCount': list(self.attempts.values())[-1] if self.attempts else 0, 'lastSendMode': self.last_send_mode, 'rejectedSteers': self.rejected_steers, 'lastCreation': self.last_creation, 'processReads': self.process_reads}
     def upload(self, key, identifier, name, data): return self.uploads.put(key, identifier, name, data)

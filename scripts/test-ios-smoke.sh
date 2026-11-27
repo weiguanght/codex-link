@@ -2,6 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 mkdir -p "$ROOT/build"
+if [ "${LINK_UI_ONLY:-0}" = "1" ]; then LINK_UI_TEST=1; fi
 SMOKE_FLAGS="LINK_SMOKE"
 if [ "${LINK_SYNTAX_ONLY:-0}" = "1" ]; then SMOKE_FLAGS="$SMOKE_FLAGS LINK_SYNTAX_ONLY"; fi
 python3 "$ROOT/scripts/make-icon.py"
@@ -49,16 +50,7 @@ xcrun simctl bootstatus "$DEVICE" -b
 xcrun simctl terminate "$DEVICE" local.codex.link >/dev/null 2>&1 || true
 xcrun simctl install "$DEVICE" "$ROOT/build/smoke-simulator/CodexLink.app"
 CONTAINER="$(xcrun simctl get_app_container "$DEVICE" local.codex.link data)"
-rm -f "$CONTAINER/Documents/smoke.json"
-SIMCTL_CHILD_LINK_SMOKE_PORT="$PORT" SIMCTL_CHILD_LINK_SMOKE_PIN="$PIN" SIMCTL_CHILD_LINK_SMOKE_ID="$ID" \
-  xcrun simctl launch "$DEVICE" local.codex.link
-for _ in {1..180}; do
-  if [ -f "$CONTAINER/Documents/smoke.json" ]; then
-    cp "$CONTAINER/Documents/smoke.json" "$ROOT/build/ios-smoke-result.json"
-    xcrun simctl io "$DEVICE" screenshot "$ROOT/build/native-home.png" >/dev/null 2>&1
-    cat "$ROOT/build/ios-smoke-result.json"
-    python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["result"]=="PASS" else 1)' "$ROOT/build/ios-smoke-result.json"
-    if [ "${LINK_UI_TEST:-0}" = "1" ]; then
+run_ui_tests() {
       python3 - "$ROOT" "$STAGE/config.json" <<'PY'
 import json, pathlib, plistlib, sys
 root = pathlib.Path(sys.argv[1]); config = json.loads(pathlib.Path(sys.argv[2]).read_text())
@@ -81,6 +73,23 @@ PY
         "${UI_TEST_ARGS[@]}" -resultBundlePath "$ROOT/build/native-ui-$(date +%Y%m%d-%H%M%S).xcresult" \
         > "$ROOT/build/native-ui-test.log" 2>&1
       xcrun simctl io "$DEVICE" screenshot "$ROOT/build/native-ui-final.png" >/dev/null 2>&1 || true
+}
+# Run only XCTest when iterating a targeted UI regression. Full smoke remains the default.
+if [ "${LINK_UI_ONLY:-0}" = "1" ]; then
+  run_ui_tests
+  exit
+fi
+rm -f "$CONTAINER/Documents/smoke.json"
+SIMCTL_CHILD_LINK_SMOKE_PORT="$PORT" SIMCTL_CHILD_LINK_SMOKE_PIN="$PIN" SIMCTL_CHILD_LINK_SMOKE_ID="$ID" \
+  xcrun simctl launch "$DEVICE" local.codex.link
+for _ in {1..180}; do
+  if [ -f "$CONTAINER/Documents/smoke.json" ]; then
+    cp "$CONTAINER/Documents/smoke.json" "$ROOT/build/ios-smoke-result.json"
+    xcrun simctl io "$DEVICE" screenshot "$ROOT/build/native-home.png" >/dev/null 2>&1
+    cat "$ROOT/build/ios-smoke-result.json"
+    python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["result"]=="PASS" else 1)' "$ROOT/build/ios-smoke-result.json"
+    if [ "${LINK_UI_TEST:-0}" = "1" ]; then
+      run_ui_tests
     fi
     exit
   fi

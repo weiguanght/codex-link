@@ -197,6 +197,18 @@ struct NativeChatView: View {
             .accessibilityLabel("会话状态与详情")
             .frame(maxWidth: .infinity)
 
+            if pendingRequestCount > 0 {
+                NativeIconButton(symbol: "hand.raised", label: "待处理请求：\(pendingRequestCount)") {
+                    NativeRequestKeyboard.dismiss()
+                    focused = false; following = true; scrollRequest += 1
+                }
+                .overlay(alignment: .topTrailing) {
+                    Text("\(pendingRequestCount)").font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white).padding(3).background(.orange, in: Circle())
+                        .allowsHitTesting(false).accessibilityHidden(true)
+                }
+                .accessibilityIdentifier("native.request.open")
+            }
             if chat.session == nil {
                 NativeIconButton(symbol: "gearshape", label: "设置", action: onSettings)
                     .accessibilityIdentifier("native.home.settings")
@@ -216,6 +228,7 @@ struct NativeChatView: View {
         let title = chat.meta["title"].string
         return title.isEmpty ? session.title : title
     }
+    private var pendingRequestCount: Int { chat.requests.filter { !chat.wasResponded($0) }.count }
     private func menuAction(_ title: String, icon: String, identifier: String, enabled: Bool = true, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             NativeDropdownLabel(title: title, symbol: icon)
@@ -345,7 +358,7 @@ struct NativeChatView: View {
             await chat.older()
         }
         .overlay(alignment: .bottomTrailing) {
-            if !following { NativeIconButton(symbol: "arrow.down", label: "回到最新消息", filled: true) { following = true; scrollRequest += 1 }.padding(16).padding(.bottom, composerHeight) }
+            if !following && pendingRequestCount == 0 { NativeIconButton(symbol: "arrow.down", label: "回到最新消息", filled: true) { following = true; scrollRequest += 1 }.padding(16).padding(.bottom, composerHeight) }
         }
         .overlay(alignment: .bottom) {
             NativeChatComposer(chat: chat, draft: chat.composer, focus: $focused, contextUsage: contextUsage, uploading: uploading,
@@ -363,7 +376,7 @@ struct NativeChatView: View {
         VStack(alignment: .leading, spacing: 24) {
         if chat.loading { ProgressView("正在读取对话…").frame(maxWidth: .infinity).padding(.vertical, 24) }
         if chat.running { HStack(spacing: 10) { ProgressView().scaleEffect(0.7); Text("Codex 正在执行").font(.caption).foregroundStyle(.secondary) } }
-        ForEach(Array(chat.requests.enumerated()), id: \.offset) { _, request in NativeApprovalView(chat: chat, request: request) }
+        ForEach(chat.requests.map { NativeAgentRequest(value: $0) }) { request in NativeApprovalView(chat: chat, request: request.value) }
         if !chat.files.isEmpty {
             DisclosureGroup {
                 NativeFileListLayout {

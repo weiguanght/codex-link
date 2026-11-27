@@ -1,6 +1,111 @@
 import XCTest
 
 final class NativeFlows: XCTestCase {
+    private func revealRequest(_ app: XCUIApplication, _ element: XCUIElement, earlier: Bool = false) {
+        let transcript = app.descendants(matching: .any).matching(identifier: "native.transcript").firstMatch
+        XCTAssertTrue(transcript.waitForExistence(timeout: 10))
+        for _ in 0..<24 {
+            let composer = app.descendants(matching: .any).matching(identifier: "native.composer").firstMatch
+            let bottom = composer.exists ? min(transcript.frame.maxY, composer.frame.minY) : transcript.frame.maxY
+            let frame = element.exists ? element.frame : .zero
+            if !frame.isEmpty && frame.midY > transcript.frame.minY + 8 && frame.midY < bottom - 8 && element.isHittable { return }
+            let above = !frame.isEmpty ? frame.midY < transcript.frame.minY + 8 : earlier
+            let middle = (transcript.frame.minY + bottom) / 2
+            let direction: CGFloat = above ? -1 : 1
+            let distance = min(140, max(50, frame.isEmpty ? 140 : abs(frame.midY - middle)))
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            let from = origin.withOffset(CGVector(dx: transcript.frame.minX + 24, dy: middle + direction * distance / 2))
+            let to = origin.withOffset(CGVector(dx: transcript.frame.minX + 24, dy: middle - direction * distance / 2))
+            from.press(forDuration: 0.05, thenDragTo: to)
+        }
+        capture("Unreachable request control: " + element.identifier)
+        XCTAssertTrue(element.exists && element.isHittable, "Request control is not reachable: " + element.identifier)
+    }
+    private func waitUntilGone(_ element: XCUIElement, timeout: TimeInterval = 12) {
+        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !element.exists }, object: nil)
+        let result = XCTWaiter.wait(for: [expectation], timeout: timeout)
+        if result != .completed { capture("Request still visible after submission: " + element.identifier) }
+        XCTAssertEqual(result, .completed)
+    }
+    private func sendInteractionFixture(_ app: XCUIApplication, _ text: String) {
+        let composer = app.descendants(matching: .any).matching(identifier: "native.composer").firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 10))
+        composer.tap(); composer.typeText(text); app.buttons["native.send"].tap()
+        let empty = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let value = composer.value as? String ?? ""
+            return value.isEmpty || value == composer.placeholderValue
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [empty], timeout: 10), .completed)
+    }
+    private func assertInteractionReport(_ app: XCUIApplication, _ text: String) {
+        // Native Markdown exposes selectable UITextViews, not SwiftUI StaticText.
+        let report = app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier == %@ AND (label CONTAINS %@ OR value CONTAINS %@)",
+            "native.message.selectable", text, text
+        )).firstMatch
+        revealRequest(app, report, earlier: true)
+        XCTAssertTrue(report.waitForExistence(timeout: 10), "Missing fixture response: " + text)
+    }
+    func testMobileApprovalsAndAgentAnswers() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "local.codex.link")
+        for key in ["PORT", "PIN", "ID"] {
+            let name = "LINK_SMOKE_" + key
+            app.launchEnvironment[name] = ProcessInfo.processInfo.environment[name]
+        }
+        app.launchEnvironment["LINK_SMOKE_UI"] = "1"
+        app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN", "-native.followUpBehavior", "send"]
+        app.launch()
+        let session = app.buttons["native.home.session.00000000-0000-0000-0000-000000000002"]
+        XCTAssertTrue(session.waitForExistence(timeout: 40)); session.tap()
+
+        sendInteractionFixture(app, "Synthetic mobile inputs")
+        let pendingRequests = app.buttons["native.request.open"]
+        XCTAssertTrue(pendingRequests.waitForExistence(timeout: 10)); pendingRequests.tap()
+        let submit = app.buttons["native.request.submit.mobile-input"]
+        revealRequest(app, submit); submit.tap()
+        XCTAssertTrue(app.staticTexts["请回答所有问题"].waitForExistence(timeout: 8))
+        let option = app.buttons["native.request.option.mobile-input.choice.B"]
+        revealRequest(app, option, earlier: true)
+        XCTAssertEqual(option.value as? String, "未选择"); option.tap()
+        let notes = app.descendants(matching: .any).matching(identifier: "native.request.answer.mobile-input.notes").firstMatch
+        revealRequest(app, notes); notes.tap(); notes.typeText("Mobile free reply\nSecond line")
+        let done = app.buttons["native.request.keyboard.done.mobile-input.notes"]
+        XCTAssertTrue(done.waitForExistence(timeout: 8)); done.tap()
+        waitUntilGone(app.keyboards.firstMatch)
+        let accept = app.buttons["native.request.accept.mobile-command"]
+        revealRequest(app, accept, earlier: true); accept.tap(); waitUntilGone(accept)
+        revealRequest(app, option)
+        XCTAssertEqual(option.value as? String, "已选择", "Removing another request must not move this answer")
+        revealRequest(app, notes)
+        XCTAssertTrue((notes.value as? String ?? "").contains("Mobile free reply"), "Polling must preserve custom input")
+        revealRequest(app, submit); submit.tap(); waitUntilGone(submit)
+        XCTAssertFalse(pendingRequests.exists)
+        assertInteractionReport(app, "Mobile notes: Mobile free reply\nSecond line")
+        assertInteractionReport(app, "Mobile choice: B")
+        capture("Native choice and multiline reply survive polling and another approval")
+
+        sendInteractionFixture(app, "Synthetic mobile approvals")
+        let permission = app.buttons["native.request.accept.mobile-permission"]
+        revealRequest(app, permission, earlier: true); permission.tap(); waitUntilGone(permission)
+        let decline = app.buttons["native.request.decline.mobile-decline"]
+        revealRequest(app, decline)
+        XCTAssertFalse(app.buttons["native.request.accept.mobile-decline"].exists)
+        decline.tap(); waitUntilGone(decline)
+        let cancel = app.buttons["native.request.cancel.mobile-cancel"]
+        revealRequest(app, cancel); cancel.tap(); waitUntilGone(cancel)
+        for report in ["mobile-permission: accept", "mobile-decline: decline", "mobile-cancel: cancel"] {
+            assertInteractionReport(app, report)
+        }
+        capture("Native turn permission, decline and cancellation are actionable")
+
+        sendInteractionFixture(app, "Synthetic mobile desktop")
+        let desktop = app.buttons["native.request.accept.mobile-desktop"]
+        revealRequest(app, desktop)
+        waitUntilGone(desktop, timeout: 20)
+        assertInteractionReport(app, "Mac 已处理此请求")
+        sendInteractionFixture(app, "Synthetic mobile reset")
+    }
     private func processSummary(_ app: XCUIApplication) -> XCUIElement {
         let transcript = app.descendants(matching: .any).matching(identifier: "native.transcript").firstMatch
         XCTAssertTrue(transcript.waitForExistence(timeout: 8))
