@@ -61,7 +61,7 @@ Runestone、Tree-sitter、Highlight.js 和 Prism 的固定版本源码及对应�
 
 命令详情与换行设置可单独运行 `LINK_UI_TEST=1 LINK_UI_TEST_CASE=NativeUITests/NativeFlows/testToolDetailsAndWrapping bash scripts/test-ios-smoke.sh`；不指定 `LINK_UI_TEST_CASE` 时执行完整 UI 流程。
 
-IPA 构建使用 `bash scripts/build-ios.sh`。脚本按 `Info.plist` 版本生成未签名与 TrollStore 包，验证归档和 ad-hoc 签名，并写出 `build/SHA256SUMS.txt`。原生 UI 必须覆盖安装新 IPA；Bundle ID、Keychain service/account 和配对凭据标识不变，不需重新配对。
+IPA 构建使用 `bash scripts/build-ios.sh`。脚本按 `Info.plist` 版本生成未签名与 TrollStore 包，将 Payload／App 根目录及可执行文件设为 `0755`、资源设为 `0644`；归档生成后再检查实际权限和应用标识，验证归档和 ad-hoc 签名，并写出 `build/SHA256SUMS.txt`。原生 UI 必须覆盖安装新 IPA；Bundle ID、Keychain service/account 和配对凭据标识不变，不需重新配对。启动崩溃与打包检查见 [iOS 安装包权限](ios-package-permissions.md)。
 
 相机／图库入口、费用呈现及浏览器控件需要覆盖安装新版 IPA；工作区排序、隐藏项、文件导入和 token 用量 API 还需更新并重启 Mac 网关。
 

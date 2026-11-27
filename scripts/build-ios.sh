@@ -1,5 +1,7 @@
 #!/bin/bash
 set -euo pipefail
+# IPA entries must remain readable after a privileged installer copies them.
+umask 022
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$ROOT/ios/CodexLink/Info.plist")
 if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -27,6 +29,7 @@ STAGE="$(mktemp -d "$ROOT/build/package.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
 mkdir "$STAGE/Payload"
 cp -R "$APP_OUTPUT" "$STAGE/Payload/"
+python3 "$ROOT/scripts/ios-bundle.py" prepare "$STAGE/Payload"
 package_ipa() {
   local flavor="$1"
   local output="$ROOT/build/$PACKAGE-$flavor.ipa"
@@ -34,6 +37,7 @@ package_ipa() {
   rm -f "$temporary"
   (cd "$STAGE" && /usr/bin/zip -qr "$temporary" Payload)
   /usr/bin/unzip -tq "$temporary"
+  python3 "$ROOT/scripts/ios-bundle.py" verify "$temporary"
   mv -f "$temporary" "$output"
 }
 package_ipa unsigned
