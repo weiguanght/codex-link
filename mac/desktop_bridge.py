@@ -15,12 +15,22 @@ STREAM_VERSIONS = (11, 13)
 
 
 class DesktopEndpointUnavailable(IPCError):
-    def __init__(self, reason):
+    def __init__(self, reason, recovery='open_desktop'):
         self.reason = reason
-        super().__init__('Mac 网关已连接，桌面实时接口不可用。可以阅读已保存的历史。请在 Mac 打开 Codex 后重试。')
+        self.recovery = recovery
+        messages = {
+            'open_desktop': 'Mac 网关已连接，桌面实时接口不可用。可以阅读已保存的历史。请在 Mac 打开 Codex 后重试。',
+            'restart_shared': 'Mac 网关已连接，但已打开的 Codex 没有提供桌面实时接口。可以阅读已保存的历史。请通过状态栏网关启动共享模式，不要反复打开 Codex。',
+            'shared_mode_pending': 'Mac 网关已连接，正在等待 Codex 切换到共享模式。可以阅读已保存的历史。请在桌面任务结束后完整退出一次 Mac 的 Codex，等待网关自动重新启动它；不要立即手动打开。手机无需重新配对。',
+        }
+        super().__init__(messages[recovery])
 
 
 class LocalDesktopIPC(DesktopIPC):
+    def __init__(self, *args, waiting_for_shared_desktop=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.recovery = 'shared_mode_pending' if waiting_for_shared_desktop else 'open_desktop'
+
     def connect(self):
         try:
             super().connect()
@@ -30,15 +40,16 @@ class LocalDesktopIPC(DesktopIPC):
                 errno.ENOENT: 'socket_missing',
                 errno.ECONNREFUSED: 'socket_refused',
             }.get(cause.errno) if isinstance(cause, OSError) else None
-            if reason:
-                raise DesktopEndpointUnavailable(reason) from exc
+            if reason or self.recovery == 'shared_mode_pending':
+                raise DesktopEndpointUnavailable(reason or 'handshake_failed', self.recovery) from exc
             raise
 
 
 class DesktopBridge(Bridge):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, waiting_for_shared_desktop=False, **kwargs):
         super().__init__(*args, **kwargs)
-        self.ipc = LocalDesktopIPC(self.ipc.path, self._event, self._disconnected)
+        self.ipc = LocalDesktopIPC(self.ipc.path, self._event, self._disconnected,
+                                   waiting_for_shared_desktop=waiting_for_shared_desktop)
 
     def _desktop_running(self):
         executable = DesktopApp.discover(self.catalog_reader.executable)
@@ -56,9 +67,14 @@ class DesktopBridge(Bridge):
             try:
                 self.ipc.connect()
             except DesktopEndpointUnavailable as exc:
+                if exc.recovery == 'shared_mode_pending':
+                    # A deep link would reopen the ordinary desktop and prevent
+                    # the background launcher from ever observing its exit.
+                    LOG.info('Waiting for shared desktop transport (%s)', exc.reason)
+                    raise
                 if self._desktop_running():
                     LOG.warning('Running Codex Desktop IPC unavailable (%s)', exc.reason)
-                    raise
+                    raise DesktopEndpointUnavailable(exc.reason, 'restart_shared') from exc
                 # On older builds the deep link can start the closed desktop.
             except IPCError:
                 # Let the existing activation handle IPC startup and recovery.

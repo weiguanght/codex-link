@@ -39,12 +39,46 @@ class DesktopEndpointTests(unittest.TestCase):
         bridge._desktop_running = Mock(side_effect=[True, False])
         with patch('bridge.service.Bridge.activate') as activate:
             with self.assertLogs('mac.desktop_bridge', 'WARNING') as output:
-                with self.assertRaises(DesktopEndpointUnavailable):
+                with self.assertRaises(DesktopEndpointUnavailable) as raised:
                     bridge.activate(KEY)
             self.assertIn('socket_refused', output.output[0])
+            self.assertEqual(raised.exception.recovery, 'restart_shared')
             activate.assert_not_called()
             self.assertIs(bridge.activate(KEY), activate.return_value)
             activate.assert_called_once_with(KEY)
+
+    def test_waiting_for_shared_mode_reports_the_actual_recovery_action(self):
+        ipc = LocalDesktopIPC('/synthetic/ipc.sock', waiting_for_shared_desktop=True)
+        for code, reason in ((errno.ENOENT, 'socket_missing'), (errno.ECONNREFUSED, 'socket_refused')):
+            with self.subTest(code=code), patch('bridge.ipc.connect_stream', side_effect=OSError(code, 'synthetic')):
+                with self.assertRaises(DesktopEndpointUnavailable) as raised:
+                    ipc.connect()
+                self.assertEqual(raised.exception.reason, reason)
+                self.assertEqual(raised.exception.recovery, 'shared_mode_pending')
+                self.assertIn('完整退出一次', str(raised.exception))
+                self.assertIn('无需重新配对', str(raised.exception))
+                self.assertNotIn('请在 Mac 打开', str(raised.exception))
+
+    def test_waiting_handshake_failure_keeps_the_shared_recovery_context(self):
+        ipc = LocalDesktopIPC('/synthetic/ipc.sock', waiting_for_shared_desktop=True)
+        with patch('bridge.ipc.DesktopIPC.connect', side_effect=IPCError('handshake failed')):
+            with self.assertRaises(DesktopEndpointUnavailable) as raised:
+                ipc.connect()
+        self.assertEqual(raised.exception.reason, 'handshake_failed')
+        self.assertEqual(raised.exception.recovery, 'shared_mode_pending')
+
+    def test_mobile_retry_does_not_reopen_an_ordinary_desktop_during_shared_switch(self):
+        bridge = DesktopBridge.__new__(DesktopBridge)
+        bridge.session = Mock(return_value=LiveSession(KEY))
+        bridge.ipc = Mock(client_id=None)
+        bridge.ipc.connect.side_effect = DesktopEndpointUnavailable('socket_missing', 'shared_mode_pending')
+        bridge._desktop_running = Mock(return_value=False)
+        with patch('bridge.service.Bridge.activate') as activate:
+            with self.assertRaises(DesktopEndpointUnavailable) as raised:
+                bridge.activate(KEY)
+        self.assertEqual(raised.exception.recovery, 'shared_mode_pending')
+        activate.assert_not_called()
+        bridge._desktop_running.assert_not_called()
 
 
 class DesktopBridgeTests(unittest.TestCase):

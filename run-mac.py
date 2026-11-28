@@ -150,7 +150,8 @@ def main():
         if stopped.is_set():
             return
         if bridge is None:
-            bridge = DesktopBridge(args.codex_home, args.data / 'bridge')
+            bridge = DesktopBridge(args.codex_home, args.data / 'bridge',
+                                   waiting_for_shared_desktop=waiting_for_desktop is not None)
         server = LinkServer(('::', args.port), bridge, runtime / 'web', args.data, discover())
         notifications = Notifications(bridge, args.data / 'bridge', origins=lambda: list(server.origins))
         server.notifications = notifications
@@ -181,8 +182,11 @@ def main():
         if waiting_for_desktop:
             def watch_for_desktop_exit():
                 while not stopped.wait(3):
-                    if not waiting_for_desktop.desktop_in_use():
-                        print('桌面已退出，状态栏将重启共享网关。', flush=True)
+                    if waiting_for_desktop.ready_to_switch():
+                        message = ('已检测到共享桌面，状态栏将重新连接共享网关。'
+                                   if waiting_for_desktop.attached_pid is not None
+                                   else '桌面已退出，状态栏将重启共享网关。')
+                        print(message, flush=True)
                         stop()
                         return
             threading.Thread(target=watch_for_desktop_exit, daemon=True).start()

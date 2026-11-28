@@ -62,6 +62,11 @@ class SharedDesktop:
                 continue
         return False
 
+    def ready_to_switch(self):
+        # A shared GUI may have restarted between watcher polls. Adopt only its
+        # verified home/socket; never require a second quit or launch a duplicate.
+        return not self.desktop_in_use() or self.attach_existing()
+
     def start(self, stopping=lambda: False):
         profile = os.environ.get('CODEX_ELECTRON_USER_DATA_PATH')
         if not profile and self.home != (Path.home() / '.codex').resolve():

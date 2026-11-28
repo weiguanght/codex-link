@@ -57,3 +57,27 @@ class SharedAttachTests(unittest.TestCase):
             kill.assert_called_once_with(123, 0)
         with patch('mac.shared_launch.os.kill', side_effect=ProcessLookupError):
             self.assertFalse(self.desktop.running())
+
+    def test_normal_desktop_keeps_gateway_waiting_without_stopping_tasks(self):
+        with patch.object(self.desktop, 'desktop_in_use', return_value=True), \
+                patch.object(self.desktop, 'attach_existing', return_value=False) as attach, \
+                patch('mac.shared_launch.subprocess.Popen') as launch, \
+                patch('mac.shared_launch.os.kill') as kill:
+            self.assertFalse(self.desktop.ready_to_switch())
+            attach.assert_called_once_with()
+            launch.assert_not_called()
+            kill.assert_not_called()
+
+    def test_closed_desktop_allows_shared_restart_without_an_attachment(self):
+        with patch.object(self.desktop, 'desktop_in_use', return_value=False), \
+                patch.object(self.desktop, 'attach_existing') as attach:
+            self.assertTrue(self.desktop.ready_to_switch())
+            attach.assert_not_called()
+
+    def test_shared_desktop_restarted_between_polls_can_be_reconnected(self):
+        with patch.object(self.desktop, 'desktop_in_use', return_value=True), \
+                patch.object(self.desktop, 'attach_existing', return_value=True) as attach, \
+                patch('mac.shared_launch.subprocess.Popen') as launch:
+            self.assertTrue(self.desktop.ready_to_switch())
+            attach.assert_called_once_with()
+            launch.assert_not_called()
